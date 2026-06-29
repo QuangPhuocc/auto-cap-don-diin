@@ -166,7 +166,9 @@ export class DiinService {
     let certificateNumber: string | undefined;
     let premium: number | undefined;
     let cells: string[] = [];
-    let row: Locator | undefined;
+    let matchedRow: Locator | undefined;
+
+    const targetKey = plateNumber.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
     // Chờ tối đa 30 giây để DIIN sinh số Ấn chỉ (số Seri)
     for (let attempt = 0; attempt < 6; attempt++) {
@@ -177,21 +179,36 @@ export class DiinService {
         await search.press("Enter");
         await page.waitForTimeout(1500);
       }
-      row = page.locator("tr.jqgrow", { hasText: plateNumber }).first();
-      if (await row.count()) {
-        cells = (await row.locator("td").allInnerTexts()).map(x => x.trim());
+      
+      const rows = page.locator("tr.jqgrow");
+      const count = await rows.count();
+      for (let i = 0; i < count; i++) {
+        const r = rows.nth(i);
+        const rowCells = (await r.locator("td").allInnerTexts()).map(x => x.trim());
+        const plateCell = rowCells[6] || rowCells.find(x => /\d{2}[A-Z]-?[\d.]+/i.test(x)) || "";
+        const cellKey = plateCell.toUpperCase().replace(/[^A-Z0-9]/g, "");
+        if (cellKey === targetKey) {
+          matchedRow = r;
+          cells = rowCells;
+          break;
+        }
+      }
+
+      if (matchedRow) {
         // Cột Số Ấn Chỉ (PaperCertificateNo) nằm ở index 18
         certificateNumber = cells[18] || cells.find((x) => /D?\d{2}-\d{2}-\d{6}-\d+/i.test(x));
         if (certificateNumber) {
           premium = this.parseMoney(cells[15]) || this.parseMoney(cells.find((x) => /^\d{1,3}(\.\d{3})+$/.test(x)));
           break;
+        } else {
+          matchedRow = undefined;
         }
       }
       console.log(`Chờ sinh số Ấn chỉ cho ${plateNumber}, thử lại lần thứ ${attempt + 1}...`);
       await page.waitForTimeout(5000);
     }
 
-    if (!row || !(await row.count())) {
+    if (!matchedRow) {
       throw new AppError(502, `Không tìm thấy đơn vừa phát hành: ${plateNumber}`, "DIIN_RESULT_NOT_FOUND");
     }
 
@@ -201,7 +218,7 @@ export class DiinService {
       certificateNumber,
       premium
     };
-    return { ...result, ...(await this.captureCertificate(row, certificateNumber ?? plateNumber)) };
+    return { ...result, ...(await this.captureCertificate(matchedRow, certificateNumber ?? plateNumber)) };
   }
 
   private async collectBatchRows(): Promise<IssuedPolicyResult[]> {

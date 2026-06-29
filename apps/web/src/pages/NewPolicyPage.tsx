@@ -53,9 +53,10 @@ export function NewPolicyPage() {
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const form = e.currentTarget;
     setBusy(true);
     setMessage(null);
-    const f = new FormData(e.currentTarget);
+    const f = new FormData(form);
     const body = Object.fromEntries(f.entries());
 
     if (!body.seatCount) delete body.seatCount;
@@ -75,7 +76,7 @@ export function NewPolicyPage() {
         body: JSON.stringify(body)
       });
       setMessage({ ok: true, text: `Đã xếp hàng xử lý thành công. Mã job: ${r.jobId}` });
-      e.currentTarget.reset();
+      form.reset();
     } catch (err) {
       setMessage({
         ok: false,
