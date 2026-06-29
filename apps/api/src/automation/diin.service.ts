@@ -22,7 +22,14 @@ export class DiinService {
   async start() {
     this.assertConfigured();
     this.browser = await chromium.launch({ headless: env.DIIN_HEADLESS });
-    const context = await this.browser.newContext({ acceptDownloads: true, locale: "vi-VN" });
+    const context = await this.browser.newContext({
+      acceptDownloads: true,
+      locale: "vi-VN",
+      recordVideo: {
+        dir: "./videos-production",
+        size: { width: 1280, height: 720 }
+      }
+    });
     this.page = await context.newPage();
     this.page.setDefaultTimeout(env.DIIN_TIMEOUT_MS);
     await this.login();
