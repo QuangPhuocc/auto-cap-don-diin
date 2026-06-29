@@ -138,13 +138,25 @@ export class DiinService {
     if (policy.engineNumber) await page.locator("#MachineNumber").fill(policy.engineNumber);
     if (policy.effectiveDate) await page.locator("#EffectiveDate").fill(this.formatDate(policy.effectiveDate));
     await page.locator("#NumberYearInsure").fill(String(policy.insuranceYears ?? 1));
+    
+    // Tính phí để lấy số tiền thực tế
     await page.locator("#btn-premium").click();
     await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(1000);
+    const premiumText = await page.locator("#Amount").inputValue().catch(() => "0");
+    const premium = this.parseMoney(premiumText) || 0;
+    
+    // Bấm Lưu nháp đơn lẻ
     await page.locator("#btn-submit").click();
     await page.waitForLoadState("networkidle");
-    const issueButton = page.getByRole("button", { name: diinSelectors.buttons.issue });
-    if (await issueButton.count()) { await issueButton.click(); await page.waitForLoadState("networkidle"); }
-    return this.collectByPlate(policy.plateNumber, policy.customerName);
+    await page.waitForURL(url => url.pathname.includes("/DiinInsurance"), { timeout: 10000 }).catch(() => {});
+    
+    return {
+      plateNumber: policy.plateNumber,
+      customerName: policy.customerName,
+      certificateNumber: "DRAFT",
+      premium
+    };
   }
 
   async issueExcel(filePath: string): Promise<IssuedPolicyResult[]> {
@@ -160,10 +172,27 @@ export class DiinService {
     await page.locator("#ReportFile").setInputFiles(path.resolve(filePath));
     await page.locator("#btn-submit").click();
     await page.waitForLoadState("networkidle");
-    await this.clickButton(diinSelectors.buttons.calculate);
+    
+    // Bấm Tính phí ở thanh công cụ bên trái
+    const calcBtn = page.locator("button.ui-button", { hasText: "Tính phí" }).first();
+    await calcBtn.click();
     await page.waitForLoadState("networkidle");
-    await this.clickButton(diinSelectors.buttons.issue);
+    await page.waitForTimeout(4000);
+    
+    // Bấm Phát hành ở thanh công cụ bên trái
+    const issueBtn = page.locator("button.ui-button", { hasText: "Phát hành" }).first();
+    await issueBtn.click();
     await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2000);
+    
+    // Click Xác nhận phát hành trong modal popup xác nhận
+    const confirmBtn = page.locator("#btn-phat-hanh").first();
+    if (await confirmBtn.count()) {
+      await confirmBtn.click();
+      await page.waitForLoadState("networkidle");
+      await page.waitForTimeout(5000);
+    }
+    
     return this.collectBatchRows();
   }
 
