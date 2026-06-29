@@ -154,8 +154,8 @@ export async function processPolicyJob(data: PolicyQueueData) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     try {
-      await diin.captureScreenshot(path.resolve("screenshot-error.png"));
-      console.log("Captured error screenshot to screenshot-error.png");
+      await diin.captureScreenshot(path.resolve(`screenshot-error-${data.dbJobId}.png`));
+      console.log(`Captured error screenshot to screenshot-error-${data.dbJobId}.png`);
     } catch (screenshotError) {
       console.error("Failed to capture error screenshot:", screenshotError);
     }

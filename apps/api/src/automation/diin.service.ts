@@ -77,8 +77,13 @@ export class DiinService {
       input.dispatchEvent(new Event("change", { bubbles: true }));
     }, env.DIIN_PASSWORD);
     await page.locator("form").first().evaluate((form) => (form as HTMLFormElement).submit());
-    await page.waitForLoadState("networkidle");
-    if (!page.url().startsWith(env.DIIN_BASE_URL) || page.url().includes("/Authentication/SignIn")) {
+    const loggedIn = await page
+      .locator("a", { hasText: "Bảng kê Bảo hiểm" })
+      .first()
+      .waitFor({ state: "visible", timeout: 15000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!loggedIn) {
       throw new AppError(502, "Đăng nhập DIIN thất bại", "DIIN_LOGIN_FAILED");
     }
   }
@@ -353,12 +358,12 @@ export class DiinService {
   }
 
   private formatDate(date: Date) {
-    const d = new Date(date);
-    const day = String(d.getDate()).padStart(2, "0");
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const year = d.getFullYear();
-    const hours = String(d.getHours()).padStart(2, "0");
-    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const vnTime = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+    const day = String(vnTime.getUTCDate()).padStart(2, "0");
+    const month = String(vnTime.getUTCMonth() + 1).padStart(2, "0");
+    const year = vnTime.getUTCFullYear();
+    const hours = String(vnTime.getUTCHours()).padStart(2, "0");
+    const minutes = String(vnTime.getUTCMinutes()).padStart(2, "0");
     return `${day}/${month}/${year} ${hours}:${minutes}`;
   }
 
