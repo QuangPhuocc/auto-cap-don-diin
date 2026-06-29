@@ -1,0 +1,105 @@
+import { Client } from "ssh2";
+
+const conn = new Client();
+
+const envContent = `NODE_ENV=production
+PORT=4000
+WEB_URL=http://103.211.200.219:5173
+DATABASE_URL=file:./dev.db
+JWT_SECRET=diin-local-dev-secret-0941941049-allow-real-issue
+JWT_EXPIRES_IN=8h
+DIIN_BASE_URL=https://daily.diin.com.vn
+DIIN_USERNAME=0906643381
+DIIN_PASSWORD=0906643381@
+DIIN_HEADLESS=true
+DIIN_ALLOW_ISSUE=true
+DIIN_TIMEOUT_MS=45000
+DIIN_QUEUE_MODE=sync
+UPLOAD_DIR=./uploads
+PDF_DIR=./downloads
+MAX_UPLOAD_MB=20
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=ChangeMe123!
+ADMIN_FULL_NAME=Quản trị viên
+`;
+
+const commands = [
+  // 1. Dừng các tiến trình cũ
+  "pm2 delete all || true",
+  "pkill -f Quan-li-TGI-CN-Gia-Lai || true",
+  "pkill -f node || true",
+  "pkill -f vite || true",
+  
+  // 2. Cài đặt pnpm toàn cục
+  "npm i -g pnpm",
+  
+  // 3. Clone code mới về VPS
+  "rm -rf /root/auto-cap-don-diin",
+  "git clone https://github.com/QuangPhuocc/auto-cap-don-diin.git /root/auto-cap-don-diin",
+  
+  // 4. Viết file .env vào thư mục gốc và apps/api
+  `cat << 'EOF' > /root/auto-cap-don-diin/.env\n${envContent}\nEOF`,
+  `cat << 'EOF' > /root/auto-cap-don-diin/apps/api/.env\n${envContent}\nEOF`,
+
+  // 5. Cài đặt các gói thư viện
+  "cd /root/auto-cap-don-diin && pnpm install --no-frozen-lockfile",
+
+  // 6. Biên dịch ứng dụng
+  "cd /root/auto-cap-don-diin && pnpm run build",
+
+  // 7. Đồng bộ database SQLite & Seed dữ liệu admin/ctv
+  "cd /root/auto-cap-don-diin/apps/api && npx prisma db push --accept-data-loss",
+  "cd /root/auto-cap-don-diin/apps/api && npx prisma db seed",
+
+  // 8. Cài đặt các trình duyệt Chromium và các thư viện cần thiết cho Playwright
+  "npx playwright install chromium --with-deps",
+
+  // 9. Chạy ứng dụng bằng PM2
+  "cd /root/auto-cap-don-diin/apps/api && pm2 start dist/server.js --name diin-api",
+  "cd /root/auto-cap-don-diin/apps/web && pm2 start 'npx vite preview --host 0.0.0.0 --port 5173' --name diin-web",
+  
+  // 10. Lưu lại danh sách PM2
+  "pm2 save",
+  
+  // 11. Kiểm tra trạng thái PM2
+  "pm2 list"
+];
+
+conn.on("ready", () => {
+  console.log("SSH Connected successfully! Starting deployment steps...\n");
+  
+  let i = 0;
+  function runNext() {
+    if (i >= commands.length) {
+      console.log("\nDeployment completed successfully!");
+      conn.end();
+      return;
+    }
+    
+    const cmd = commands[i];
+    console.log(`[EXECUTE] ${cmd.split("\n")[0]}`);
+    conn.exec(cmd, (err, stream) => {
+      if (err) {
+        console.error(`Error running command: ${cmd}`, err);
+        conn.end();
+        return;
+      }
+      stream.on("close", (code) => {
+        console.log(`[FINISHED] code: ${code}\n`);
+        i++;
+        runNext();
+      }).on("data", (data: Buffer) => {
+        process.stdout.write(data);
+      }).stderr.on("data", (data: Buffer) => {
+        process.stderr.write(data);
+      });
+    });
+  }
+  
+  runNext();
+}).connect({
+  host: "103.211.200.219",
+  port: 22,
+  username: "root",
+  password: "Ku7Vrtq1ephRUXUx"
+});
