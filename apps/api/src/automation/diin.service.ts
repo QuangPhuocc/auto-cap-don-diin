@@ -222,7 +222,7 @@ export class DiinService {
 
     const result: IssuedPolicyResult = {
       plateNumber,
-      customerName: cells.find((x) => /[A-ZÀ-Ỹ]{2,}\s+[A-ZÀ-Ỹ]{2,}/i.test(x)) || fallbackName,
+      customerName: fallbackName,
       certificateNumber,
       premium
     };
@@ -247,7 +247,11 @@ export class DiinService {
         
         const certificateNumber = cells.find((x) => /D?\d{2}-\d{2}-\d{5,8}-\d+/i.test(x));
         const plateNumber = cells.find((x) => /\d{2}[A-Z]-?[\d.]+/i.test(x)) ?? "UNKNOWN";
-        const customerName = cells.find((x) => /[A-ZÀ-Ỹ]{2,}\s+[A-ZÀ-Ỹ]{2,}/i.test(x)) || "";
+        const customerName = cells.find((x) => {
+          const clean = x.trim();
+          return /[A-ZÀ-Ỹ]{2,}\s+[A-ZÀ-Ỹ]{2,}/i.test(clean) && 
+                 !/GCN|Tái tục|Phát hành|Hủy|TNDS|Bảo hiểm/i.test(clean);
+        }) || "";
         
         if (!certificateNumber) {
           allHaveSeri = false;
