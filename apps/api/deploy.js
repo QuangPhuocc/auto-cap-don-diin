@@ -44,6 +44,9 @@ const commands = [
   // 5. Install libraries
   "cd /root/auto-cap-don-diin && pnpm install --no-frozen-lockfile",
 
+  // 5b. Generate Prisma client
+  "cd /root/auto-cap-don-diin/apps/api && npx prisma generate",
+
   // 6. Build the workspaces
   "cd /root/auto-cap-don-diin && pnpm run build",
 
