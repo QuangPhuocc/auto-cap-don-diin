@@ -146,17 +146,13 @@ export class DiinService {
     const premiumText = await page.locator("#Amount").inputValue().catch(() => "0");
     const premium = this.parseMoney(premiumText) || 0;
     
-    // Bấm Lưu nháp đơn lẻ
+    const submissionTime = new Date();
+    // Bấm Lưu (Cổng DIIN tự động phát hành thẻ bảo hiểm)
     await page.locator("#btn-submit").click();
     await page.waitForLoadState("networkidle");
-    await page.waitForURL(url => url.pathname.includes("/DiinInsurance"), { timeout: 10000 }).catch(() => {});
+    await page.waitForURL(url => url.pathname.includes("/DiinInsurance"), { timeout: 15000 }).catch(() => {});
     
-    return {
-      plateNumber: policy.plateNumber,
-      customerName: policy.customerName,
-      certificateNumber: "DRAFT",
-      premium
-    };
+    return this.collectByPlate(policy.plateNumber, policy.customerName, submissionTime);
   }
 
   async issueExcel(filePath: string): Promise<IssuedPolicyResult[]> {
@@ -196,7 +192,7 @@ export class DiinService {
     return this.collectBatchRows();
   }
 
-  private async collectByPlate(plateNumber: string, fallbackName: string): Promise<IssuedPolicyResult> {
+  private async collectByPlate(plateNumber: string, fallbackName: string, submissionTime: Date): Promise<IssuedPolicyResult> {
     const page = this.activePage;
     let certificateNumber: string | undefined;
     let premium: number | undefined;
@@ -215,6 +211,9 @@ export class DiinService {
         await page.waitForTimeout(1500);
       }
       
+      // Đợi lưới dữ liệu tải xong ít nhất 1 dòng
+      await page.locator("tr.jqgrow").first().waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+
       const rows = page.locator("tr.jqgrow");
       const count = await rows.count();
       for (let i = 0; i < count; i++) {
@@ -225,9 +224,25 @@ export class DiinService {
           return cellKey === targetKey;
         });
         if (hasPlate) {
-          matchedRow = r;
-          cells = rowCells;
-          break;
+          // Lấy cell ngày tạo (Tạo lúc) và parse ngày để so sánh
+          const dateCell = rowCells.find(x => /\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}/.test(x));
+          if (dateCell) {
+            const diinDate = this.parseDiinDate(dateCell);
+            if (diinDate) {
+              const diffMs = Math.abs(diinDate.getTime() - submissionTime.getTime());
+              // Cho phép chênh lệch tối đa 90 giây (đề phòng giây lệch và làm tròn phút trên cổng DIIN)
+              if (diffMs <= 90000) {
+                matchedRow = r;
+                cells = rowCells;
+                break;
+              }
+            }
+          } else {
+            // Fallback nếu không có ngày tạo
+            matchedRow = r;
+            cells = rowCells;
+            break;
+          }
         }
       }
 
@@ -262,6 +277,9 @@ export class DiinService {
     const page = this.activePage;
     let results: IssuedPolicyResult[] = [];
     
+    // Đợi lưới dữ liệu tải xong ít nhất 1 dòng
+    await page.locator("tr.jqgrow").first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
+
     // Chờ tối đa 30 giây để tất cả các dòng đều có số Seri (Seri Ac)
     for (let attempt = 0; attempt < 6; attempt++) {
       const rows = page.locator("tr.jqgrow");
@@ -300,10 +318,12 @@ export class DiinService {
       console.log(`Chờ sinh số Seri cho bảng kê, thử lại lần thứ ${attempt + 1}...`);
       await page.waitForTimeout(5000);
       await page.reload({ waitUntil: "networkidle" });
+      await page.locator("tr.jqgrow").first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
     }
 
     // Sau khi đã có (hoặc hết thời gian chờ), tải PDF cho từng dòng
     const finalResults: IssuedPolicyResult[] = [];
+    await page.locator("tr.jqgrow").first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
     const rows = page.locator("tr.jqgrow");
     const count = await rows.count();
     for (let i = 0; i < count; i++) {
@@ -368,4 +388,18 @@ export class DiinService {
   }
 
   private parseMoney(value?: string) { return value ? Number(value.replace(/\./g, "").replace(/,/g, ".")) : undefined; }
+
+  private parseDiinDate(dateStr: string): Date | null {
+    const match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (!match) return null;
+    const [_, day, month, year, hour, minute, second] = match;
+    return new Date(
+      parseInt(year, 10),
+      parseInt(month, 10) - 1,
+      parseInt(day, 10),
+      parseInt(hour, 10),
+      parseInt(minute, 10),
+      second ? parseInt(second, 10) : 0
+    );
+  }
 }
