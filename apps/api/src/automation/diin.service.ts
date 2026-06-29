@@ -136,7 +136,13 @@ export class DiinService {
     if (policy.email) await page.locator("#Email").fill(policy.email);
     if (policy.chassisNumber) await page.locator("#ChassisNumber").fill(policy.chassisNumber);
     if (policy.engineNumber) await page.locator("#MachineNumber").fill(policy.engineNumber);
-    if (policy.effectiveDate) await page.locator("#EffectiveDate").fill(this.formatDate(policy.effectiveDate));
+    let effDate = policy.effectiveDate ? new Date(policy.effectiveDate) : new Date();
+    const now = new Date();
+    if (effDate.getTime() < now.getTime()) {
+      // Nếu thời gian hiệu lực ở quá khứ do độ trễ hàng đợi, tự động đổi thành thời điểm hiện tại cộng 2 phút cho an toàn
+      effDate = new Date(now.getTime() + 2 * 60 * 1000);
+    }
+    await page.locator("#EffectiveDate").fill(this.formatDate(effDate));
     await page.locator("#NumberYearInsure").fill(String(policy.insuranceYears ?? 1));
     
     // Tính phí để lấy số tiền thực tế
@@ -169,14 +175,14 @@ export class DiinService {
     await page.locator("#btn-submit").click();
     await page.waitForLoadState("networkidle");
     
-    // Bấm Tính phí ở thanh công cụ bên trái
-    const calcBtn = page.locator("button.ui-button", { hasText: "Tính phí" }).first();
+    // Bấm Tính phí ở thanh công cụ bên trái (dùng .w-100 để không kích hoạt nhầm dòng trong bảng)
+    const calcBtn = page.locator("button.w-100.ui-button", { hasText: "Tính phí" }).first();
     await calcBtn.click();
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(4000);
     
-    // Bấm Phát hành ở thanh công cụ bên trái
-    const issueBtn = page.locator("button.ui-button", { hasText: "Phát hành" }).first();
+    // Bấm Phát hành ở thanh công cụ bên trái (dùng .w-100 để không kích hoạt nhầm dòng trong bảng)
+    const issueBtn = page.locator("button.w-100.ui-button", { hasText: "Phát hành" }).first();
     await issueBtn.click();
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(2000);
