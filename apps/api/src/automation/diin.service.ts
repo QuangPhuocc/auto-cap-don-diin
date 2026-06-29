@@ -191,9 +191,11 @@ export class DiinService {
       for (let i = 0; i < count; i++) {
         const r = rows.nth(i);
         const rowCells = (await r.locator("td").allInnerTexts()).map(x => x.trim());
-        const plateCell = rowCells[6] || rowCells.find(x => /\d{2}[A-Z]-?[\d.]+/i.test(x)) || "";
-        const cellKey = plateCell.toUpperCase().replace(/[^A-Z0-9]/g, "");
-        if (cellKey === targetKey) {
+        const hasPlate = rowCells.some(cell => {
+          const cellKey = cell.toUpperCase().replace(/[^A-Z0-9]/g, "");
+          return cellKey === targetKey;
+        });
+        if (hasPlate) {
           matchedRow = r;
           cells = rowCells;
           break;
@@ -201,8 +203,8 @@ export class DiinService {
       }
 
       if (matchedRow) {
-        // Cột Số Ấn Chỉ (PaperCertificateNo) nằm ở index 18
-        certificateNumber = cells[18] || cells.find((x) => /D?\d{2}-\d{2}-\d{6}-\d+/i.test(x));
+        // Cột Số Ấn Chỉ (PaperCertificateNo) khớp theo định dạng số Ấn Chỉ mới (5 đến 8 số cuối)
+        certificateNumber = cells.find((x) => /D?\d{2}-\d{2}-\d{5,8}-\d+/i.test(x));
         if (certificateNumber) {
           premium = this.parseMoney(cells[15]) || this.parseMoney(cells.find((x) => /^\d{1,3}(\.\d{3})+$/.test(x)));
           break;
@@ -220,7 +222,7 @@ export class DiinService {
 
     const result: IssuedPolicyResult = {
       plateNumber,
-      customerName: cells[9] || cells.find((x) => x.trim() === fallbackName)?.trim() || fallbackName,
+      customerName: cells.find((x) => /[A-ZÀ-Ỹ]{2,}\s+[A-ZÀ-Ỹ]{2,}/i.test(x)) || fallbackName,
       certificateNumber,
       premium
     };
@@ -243,10 +245,9 @@ export class DiinService {
         const cells = (await row.locator("td").allInnerTexts()).map((x) => x.trim());
         if (!cells.length) continue;
         
-        // Trong /InsuranceMasterDetail, cột Seri Ac có index 15, Biển số index 6, Họ & Tên index 9
-        const certificateNumber = cells[15] || cells.find((x) => /D?\d{2}-\d{2}-\d{6}-\d+/i.test(x));
-        const plateNumber = (cells[6] || cells.find((x) => /\d{2}[A-Z]-?[\d.]+/i.test(x))) ?? "UNKNOWN";
-        const customerName = cells[9] || cells.find((x) => /[A-ZÀ-Ỹ]{2,}\s+[A-ZÀ-Ỹ]/i.test(x)) || "";
+        const certificateNumber = cells.find((x) => /D?\d{2}-\d{2}-\d{5,8}-\d+/i.test(x));
+        const plateNumber = cells.find((x) => /\d{2}[A-Z]-?[\d.]+/i.test(x)) ?? "UNKNOWN";
+        const customerName = cells.find((x) => /[A-ZÀ-Ỹ]{2,}\s+[A-ZÀ-Ỹ]{2,}/i.test(x)) || "";
         
         if (!certificateNumber) {
           allHaveSeri = false;
