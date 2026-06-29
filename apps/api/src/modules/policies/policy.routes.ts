@@ -110,28 +110,39 @@ policyRouter.get("/export", asyncHandler(async (req, res) => {
   const policies = await prisma.policy.findMany({
     where,
     orderBy: { createdAt: "desc" },
-    include: { user: { select: { fullName: true } } }
+    include: { user: { select: { username: true, fullName: true } } }
   });
 
-  const exportData = policies.map((p) => ({
-    "CTV Phát Hành": p.user?.fullName || "",
-    "Họ Tên Chủ Xe": p.customerName,
-    "Biển Số": p.plateNumber,
-    "Số Khung": p.chassisNumber || "",
-    "Số Máy": p.engineNumber || "",
-    "Loại Xe": p.vehicleType || "",
-    "Số Chỗ Ngồi": p.seatCount || "",
-    "Số Khách NNTX": p.passengerCount || 0,
-    "Phí BH/1 Chỗ": p.passengerFee || 0,
-    "Số Điện Thoại": p.phone || "",
-    "Email": p.email || "",
-    "Địa Chỉ": p.address || "",
-    "Trạng Thái": p.status,
-    "Số Ấn Chỉ (GCN)": p.certificateNumber || "",
-    "Tổng Phí": p.premium ? Number(p.premium) : "",
-    "Ngày Phát Hành": p.issuedAt ? p.issuedAt.toISOString() : "",
-    "Ngày Tạo": p.createdAt.toISOString()
-  }));
+  const exportData = policies.map((p, index) => {
+    const totalPremium = p.premium ? Number(p.premium) : 0;
+    const passengerTotalFee = (p.passengerCount || 0) * (p.passengerFee || 0);
+    const premiumTnds = p.premium ? Math.max(0, totalPremium - passengerTotalFee) : "";
+
+    const formatDate = (date: Date | null) => {
+      if (!date) return "";
+      const d = new Date(date);
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${day}/${month}/${year}`;
+    };
+
+    return {
+      "STT": index + 1,
+      "GCN": p.certificateNumber || "",
+      "TÊN KHÁCH HÀNG": p.customerName,
+      "BIỂN SỐ": p.plateNumber,
+      "NGÀY CẤP": formatDate(p.issuedAt),
+      "NGÀY HIỆU LỰC": formatDate(p.effectiveDate),
+      "PHÍ TNDS": premiumTnds,
+      "LP NNTX": passengerTotalFee,
+      "TỔNG PHÍ": p.premium ? totalPremium : "",
+      "TRẠNG THÁI": p.status === "ISSUED" ? "Đã phát hành" : p.status === "FAILED" ? "Thất bại" : p.status === "PROCESSING" ? "Đang xử lý" : "Chờ phát hành",
+      "NGƯỜI CẤP (Tên tài khoản)": p.user?.username || "",
+      "ĐẠI LÝ": p.agent || "",
+      "SDT": p.phone || ""
+    };
+  });
 
   const wb = xlsx.utils.book_new();
   const ws = xlsx.utils.json_to_sheet(exportData);

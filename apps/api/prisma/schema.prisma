@@ -51,6 +51,7 @@ model User {
   username     String      @unique
   passwordHash String      @map("password_hash")
   fullName     String      @map("full_name")
+  phone        String?
   role         UserRole    @default(CTV)
   status       UserStatus  @default(ACTIVE)
   createdAt    DateTime    @default(now()) @map("created_at")
@@ -86,6 +87,7 @@ model Policy {
   passengerCount    Int?         @default(0) @map("passenger_count")
   passengerFee      Int?         @default(0) @map("passenger_fee")
   email             String?
+  agent             String?
   insuranceYears    Int?         @default(1) @map("insurance_years")
   status             PolicyStatus @default(QUEUED)
   error              String?

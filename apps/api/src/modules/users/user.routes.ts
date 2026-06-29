@@ -15,9 +15,17 @@ const createSchema = z.object({
   username: z.string().min(3).max(100).regex(/^[a-zA-Z0-9._-]+$/),
   password: z.string().min(8).max(200),
   fullName: z.string().min(2).max(255),
+  phone: z.string().max(20).optional().nullable(),
   role: z.nativeEnum(UserRole).default(UserRole.CTV)
 });
-const updateSchema = z.object({ fullName: z.string().min(2).max(255).optional(), password: z.string().min(8).max(200).optional(), status: z.nativeEnum(UserStatus).optional(), role: z.nativeEnum(UserRole).optional() });
+const updateSchema = z.object({
+  username: z.string().min(3).max(100).regex(/^[a-zA-Z0-9._-]+$/).optional(),
+  fullName: z.string().min(2).max(255).optional(),
+  phone: z.string().max(20).optional().nullable(),
+  password: z.string().min(8).max(200).optional(),
+  status: z.nativeEnum(UserStatus).optional(),
+  role: z.nativeEnum(UserRole).optional()
+});
 
 userRouter.get("/", asyncHandler(async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
@@ -25,7 +33,7 @@ userRouter.get("/", asyncHandler(async (req, res) => {
   const q = String(req.query.q ?? "");
   const where = q ? { OR: [{ username: { contains: q } }, { fullName: { contains: q } }] } : {};
   const [items, total] = await Promise.all([
-    prisma.user.findMany({ where, select: { id: true, username: true, fullName: true, role: true, status: true, createdAt: true }, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit }),
+    prisma.user.findMany({ where, select: { id: true, username: true, fullName: true, phone: true, role: true, status: true, createdAt: true }, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit }),
     prisma.user.count({ where })
   ]);
 
@@ -74,7 +82,7 @@ userRouter.post("/", asyncHandler(async (req, res) => {
   }
   if (await prisma.user.findUnique({ where: { username: input.username } })) throw new AppError(409, "Tên đăng nhập đã tồn tại", "USERNAME_EXISTS");
   const { password, ...profile } = input;
-  const user = await prisma.user.create({ data: { ...profile, passwordHash: await bcrypt.hash(password, 12) }, select: { id: true, username: true, fullName: true, role: true, status: true, createdAt: true } });
+  const user = await prisma.user.create({ data: { ...profile, passwordHash: await bcrypt.hash(password, 12) }, select: { id: true, username: true, fullName: true, phone: true, role: true, status: true, createdAt: true } });
   await audit(req, "CTV_CREATE", { targetUserId: user.id, username: user.username });
   res.status(201).json(user);
 }));
@@ -87,8 +95,14 @@ userRouter.patch("/:id", asyncHandler(async (req, res) => {
     throw new AppError(403, "Quản lý không được phép chỉnh sửa hoặc cấp quyền Admin");
   }
   if (id === req.user!.id && input.status && input.status !== UserStatus.ACTIVE) throw new AppError(400, "Không thể tự khóa tài khoản đang đăng nhập");
+  
+  if (input.username && input.username !== targetUser.username) {
+    const existing = await prisma.user.findUnique({ where: { username: input.username } });
+    if (existing) throw new AppError(409, "Tên đăng nhập đã tồn tại", "USERNAME_EXISTS");
+  }
+
   const { password, ...data } = input;
-  const user = await prisma.user.update({ where: { id }, data: { ...data, ...(password ? { passwordHash: await bcrypt.hash(password, 12) } : {}) }, select: { id: true, username: true, fullName: true, role: true, status: true, createdAt: true } });
+  const user = await prisma.user.update({ where: { id }, data: { ...data, ...(password ? { passwordHash: await bcrypt.hash(password, 12) } : {}) }, select: { id: true, username: true, fullName: true, phone: true, role: true, status: true, createdAt: true } });
   await audit(req, "CTV_UPDATE", { targetUserId: user.id, changes: Object.keys(input) });
   res.json(user);
 }));

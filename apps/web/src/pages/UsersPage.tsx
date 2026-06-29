@@ -1,4 +1,4 @@
-import { Plus, UserRoundCog, ArrowLeft, Download, RefreshCw, Copy, Check, FileSpreadsheet } from "lucide-react";
+import { Plus, UserRoundCog, ArrowLeft, Download, RefreshCw, Copy, Check, FileSpreadsheet, Edit3 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Select } from "../components/ui";
 import { api, download } from "../lib/api";
@@ -8,6 +8,7 @@ import { dateTime, money } from "../lib/utils";
 export function UsersPage() {
   const [items, setItems] = useState<User[]>([]);
   const [show, setShow] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
   const [error, setError] = useState("");
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
@@ -24,6 +25,23 @@ export function UsersPage() {
       void load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không tạo được tài khoản");
+    }
+  }
+
+  async function updateUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError("");
+    if (!editingUser) return;
+    const form = event.currentTarget;
+    const data = Object.fromEntries(new FormData(form).entries());
+    if (!data.password) {
+      delete data.password;
+    }
+    try {
+      await api(`/users/${editingUser.id}`, { method: "PATCH", body: JSON.stringify(data) });
+      setEditingUser(null);
+      void load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không cập nhật được tài khoản");
     }
   }
 
@@ -49,9 +67,9 @@ export function UsersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Quản lý tài khoản CTV / Quản lý</h2>
-          <p className="text-muted-foreground">Tạo tài khoản, khóa hoặc kích hoạt tài khoản hệ thống</p>
+          <p className="text-muted-foreground">Tạo tài khoản, sửa thông tin, khóa hoặc kích hoạt tài khoản hệ thống</p>
         </div>
-        <Button onClick={() => setShow(!show)}><Plus size={17}/>Thêm tài khoản</Button>
+        <Button onClick={() => { setShow(!show); setEditingUser(null); }}><Plus size={17}/>Thêm tài khoản</Button>
       </div>
 
       {error && <p className="rounded-lg bg-red-50 p-3 text-red-700">{error}</p>}
@@ -62,28 +80,86 @@ export function UsersPage() {
             <CardTitle>Tạo tài khoản mới</CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={create} className="grid gap-4 md:grid-cols-5 items-end">
-              <div className="space-y-2">
-                <Label>Họ tên</Label>
-                <Input name="fullName" required/>
+            <form onSubmit={create} className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>Họ tên</Label>
+                  <Input name="fullName" required />
+                </div>
+                <div className="space-y-2">
+                  <Label>Tên đăng nhập</Label>
+                  <Input name="username" required />
+                </div>
+                <div className="space-y-2">
+                  <Label>Số điện thoại</Label>
+                  <Input name="phone" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Mật khẩu</Label>
+                  <Input name="password" type="password" minLength={8} required />
+                </div>
+                <div className="space-y-2">
+                  <Label>Vai trò</Label>
+                  <Select name="role" required defaultValue="CTV">
+                    <option value="CTV">CTV</option>
+                    <option value="MANAGER">Quản lý</option>
+                    <option value="ADMIN">Admin</option>
+                  </Select>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Tên đăng nhập</Label>
-                <Input name="username" required/>
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="outline" onClick={() => setShow(false)}>Hủy</Button>
+                <Button>Tạo tài khoản</Button>
               </div>
-              <div className="space-y-2">
-                <Label>Mật khẩu</Label>
-                <Input name="password" type="password" minLength={8} required/>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {editingUser && (
+        <Card className="border-orange-200 bg-orange-50/10">
+          <CardHeader>
+            <CardTitle>Chỉnh sửa tài khoản: {editingUser.fullName}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={updateUser} className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>Họ tên</Label>
+                  <Input name="fullName" defaultValue={editingUser.fullName} required />
+                </div>
+                <div className="space-y-2">
+                  <Label>Tên đăng nhập</Label>
+                  <Input name="username" defaultValue={editingUser.username} required />
+                </div>
+                <div className="space-y-2">
+                  <Label>Số điện thoại</Label>
+                  <Input name="phone" defaultValue={editingUser.phone || ""} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Mật khẩu mới (để trống nếu không đổi)</Label>
+                  <Input name="password" type="password" minLength={8} placeholder="••••••••" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Vai trò</Label>
+                  <Select name="role" required defaultValue={editingUser.role}>
+                    <option value="CTV">CTV</option>
+                    <option value="MANAGER">Quản lý</option>
+                    <option value="ADMIN">Admin</option>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Trạng thái</Label>
+                  <Select name="status" required defaultValue={editingUser.status || "ACTIVE"}>
+                    <option value="ACTIVE">Hoạt động</option>
+                    <option value="INACTIVE">Tạm ngưng</option>
+                    <option value="LOCKED">Đã khóa</option>
+                  </Select>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Vai trò</Label>
-                <Select name="role" required defaultValue="CTV">
-                  <option value="CTV">CTV</option>
-                  <option value="MANAGER">Quản lý</option>
-                </Select>
-              </div>
-              <div>
-                <Button className="w-full">Tạo tài khoản</Button>
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="outline" onClick={() => setEditingUser(null)}>Hủy</Button>
+                <Button>Lưu thay đổi</Button>
               </div>
             </form>
           </CardContent>
@@ -119,7 +195,9 @@ export function UsersPage() {
                         >
                           {user.fullName}
                         </div>
-                        <div className="text-xs text-muted-foreground">{user.username}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {user.username} {user.phone && `• ${user.phone}`}
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -137,15 +215,16 @@ export function UsersPage() {
                   </td>
                   <td className="p-3 text-muted-foreground">{dateTime(user.createdAt)}</td>
                   <td className="p-3">
-                    {user.role === "ADMIN" ? (
-                      <span className="text-xs text-stone-400">Không thể sửa</span>
-                    ) : (
-                      <Select className="w-36" value={user.status} onChange={(e) => changeStatus(user, e.target.value)}>
+                    <div className="flex items-center gap-2">
+                      <Select className="w-32" value={user.status} onChange={(e) => changeStatus(user, e.target.value)}>
                         <option value="ACTIVE">Hoạt động</option>
                         <option value="INACTIVE">Tạm ngưng</option>
                         <option value="LOCKED">Đã khóa</option>
                       </Select>
-                    )}
+                      <Button size="sm" variant="ghost" onClick={() => { setEditingUser(user); setShow(false); }}>
+                        <Edit3 size={15} />
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}

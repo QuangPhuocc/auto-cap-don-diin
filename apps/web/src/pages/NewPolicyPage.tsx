@@ -190,11 +190,12 @@ export function NewPolicyPage() {
                 </Select>
               </div>
 
-              {/* Email */}
-              <Field label="Email nhận GCN" name="email" type="email" required={false} />
-
-              {/* SDT */}
-              <Field label="Số điện thoại nhận GCN" name="phone" />
+              {/* Email, SDT, Dai ly */}
+              <div className="md:col-span-2 grid gap-4 grid-cols-1 md:grid-cols-3">
+                <Field label="Email nhận GCN" name="email" type="email" required={false} />
+                <Field label="Số điện thoại nhận GCN" name="phone" />
+                <Field label="Đại lý" name="agent" required={false} />
+              </div>
 
             </div>
 

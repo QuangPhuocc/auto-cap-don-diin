@@ -14,6 +14,7 @@ export const singlePolicySchema = z.object({
   passengerCount: z.coerce.number().int().min(0).max(100).default(0),
   passengerFee: z.coerce.number().int().default(0),
   email: z.string().email().optional().or(z.literal("")),
+  agent: z.string().optional().nullable(),
   insuranceYears: z.coerce.number().int().min(1).max(3).default(1)
 });
 

@@ -5,7 +5,7 @@ export const DIIN_EXCEL_HEADERS = [
   "BIỂN SỐ", "LOẠI XE", "SỐ CHỔ", "HỌ TÊN CHỦ XE", "SỐ KHUNG", "SỐ MÁY",
   "SỐ HÀNH KHÁCH ĐƯỢC BẢO HIỂM", "PHÍ BẢO HIỂM/ 1 CHỔ NGỒI", "SỐ ĐIỆN THOẠI NHẬN GCN",
   "EMAIL", "ĐỊA CHỈ", "GIỚI TÍNH", "NGÀY BẮT ĐẦU HIỆU LỰC", "GIỜ", "PHÚT",
-  "SỐ NĂM BẢO HIỂM", "LOẠI PHÔI", "SỐ PHÔI"
+  "SỐ NĂM BẢO HIỂM", "LOẠI PHÔI", "SỐ PHÔI", "ĐẠI LÝ"
 ];
 
 const normalize = (value: unknown) => String(value ?? "").trim().toUpperCase().replace(/\s+/g, " ");
