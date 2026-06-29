@@ -1,0 +1,160 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  CTV
+  MANAGER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  LOCKED
+}
+
+enum PolicyStatus {
+  QUEUED
+  PROCESSING
+  ISSUED
+  FAILED
+}
+
+enum JobType {
+  SINGLE_POLICY
+  EXCEL_UPLOAD
+}
+
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum BatchStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
+model User {
+  id           String      @id @default(uuid())
+  username     String      @unique
+  passwordHash String      @map("password_hash")
+  fullName     String      @map("full_name")
+  role         UserRole    @default(CTV)
+  status       UserStatus  @default(ACTIVE)
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  policies     Policy[]
+  jobs         Job[]
+  auditLogs    AuditLog[]
+  batches      BatchUpload[]
+
+  @@map("users")
+}
+
+model Policy {
+  id                String       @id @default(uuid())
+  userId            String       @map("user_id")
+  batchId           String?      @map("batch_id")
+  jobId             String?      @map("job_id")
+  customerName      String       @map("customer_name")
+  phone              String?
+  address            String?
+  plateNumber        String       @map("plate_number")
+  chassisNumber      String?      @map("chassis_number")
+  engineNumber       String?      @map("engine_number")
+  vehicleType        String?      @map("vehicle_type")
+  seatCount          Int?         @map("seat_count")
+  effectiveDate      DateTime?    @map("effective_date")
+  certificateNumber String?      @map("certificate_number")
+  serialNumber      String?      @map("serial_number")
+  premium            Decimal?
+  pdfUrl             String?      @map("pdf_url")
+  pdfPath            String?      @map("pdf_path")
+  gender            String?      @default("NAM")
+  passengerCount    Int?         @default(0) @map("passenger_count")
+  passengerFee      Int?         @default(0) @map("passenger_fee")
+  email             String?
+  insuranceYears    Int?         @default(1) @map("insurance_years")
+  status             PolicyStatus @default(QUEUED)
+  error              String?
+  issuedAt           DateTime?    @map("issued_at")
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+  user               User         @relation(fields: [userId], references: [id])
+  batch              BatchUpload? @relation(fields: [batchId], references: [id])
+  job                Job?         @relation(fields: [jobId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([plateNumber])
+  @@index([certificateNumber])
+  @@map("policies")
+}
+
+model Job {
+  id          String    @id @default(uuid())
+  bullJobId   String?   @unique @map("bull_job_id")
+  userId      String?   @map("user_id")
+  type        JobType
+  payload     Json
+  status      JobStatus @default(QUEUED)
+  progress    Int       @default(0)
+  error       String?
+  attempts    Int       @default(0)
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  user        User?     @relation(fields: [userId], references: [id])
+  policies    Policy[]
+  batch       BatchUpload?
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("jobs")
+}
+
+model BatchUpload {
+  id           String      @id @default(uuid())
+  userId       String      @map("user_id")
+  jobId        String?     @unique @map("job_id")
+  originalName String      @map("original_name")
+  filePath     String      @map("file_path")
+  totalRows    Int         @default(0) @map("total_rows")
+  issuedRows   Int         @default(0) @map("issued_rows")
+  failedRows   Int         @default(0) @map("failed_rows")
+  status       BatchStatus @default(QUEUED)
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  user         User        @relation(fields: [userId], references: [id])
+  job          Job?        @relation(fields: [jobId], references: [id])
+  policies     Policy[]
+
+  @@index([userId, createdAt])
+  @@map("batch_uploads")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?  @map("user_id")
+  action    String
+  details   Json?
+  ipAddress String?  @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([action])
+  @@map("audit_logs")
+}

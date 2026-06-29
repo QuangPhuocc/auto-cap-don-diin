@@ -1,0 +1,162 @@
+import path from "node:path";
+import { Router } from "express";
+import { JobType, UserRole, Prisma } from "@prisma/client";
+import xlsx from "xlsx";
+import { z } from "zod";
+import { asyncHandler } from "../../lib/async-handler.js";
+import { audit } from "../../lib/audit.js";
+import { AppError, assertFound } from "../../lib/errors.js";
+import { prisma } from "../../lib/prisma.js";
+import { excelUpload } from "../../middleware/upload.js";
+import { enqueuePolicyJob } from "../../queue/policy.queue.js";
+import { inspectExcel } from "./excel.service.js";
+import { singlePolicySchema } from "./policy.schemas.js";
+
+export const policyRouter = Router();
+const pagination = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  q: z.preprocess((val) => (val === "" ? undefined : val), z.string().optional()),
+  status: z.preprocess((val) => (val === "" ? undefined : val), z.enum(["QUEUED", "PROCESSING", "ISSUED", "FAILED"]).optional())
+});
+
+policyRouter.get("/", asyncHandler(async (req, res) => {
+  const { page, limit, q, status } = pagination.parse(req.query);
+  
+  const userIdQuery = req.query.userId ? String(req.query.userId) : undefined;
+  const own = req.user!.role === UserRole.CTV ? { userId: req.user!.id } : (userIdQuery ? { userId: userIdQuery } : {});
+  
+  const month = req.query.month ? Number(req.query.month) : undefined;
+  const year = req.query.year ? Number(req.query.year) : undefined;
+  
+  let dateFilter = {};
+  if (month && year) {
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 1);
+    dateFilter = {
+      issuedAt: {
+        gte: start,
+        lt: end
+      }
+    };
+  }
+
+  const where = { 
+    ...own, 
+    ...dateFilter,
+    ...(status ? { status } : {}), 
+    ...(q ? { OR: [{ plateNumber: { contains: q } }, { customerName: { contains: q } }, { certificateNumber: { contains: q } }] } : {}) 
+  };
+
+  const [items, total] = await Promise.all([
+    prisma.policy.findMany({ where, include: { user: { select: { username: true, fullName: true } } }, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit }),
+    prisma.policy.count({ where })
+  ]);
+  res.json({ items, total, page, limit });
+}));
+
+policyRouter.post("/single", asyncHandler(async (req, res) => {
+  const input = singlePolicySchema.parse(req.body);
+  const result = await prisma.$transaction(async (tx) => {
+    const job = await tx.job.create({ data: { userId: req.user!.id, type: JobType.SINGLE_POLICY, payload: input } });
+    const policy = await tx.policy.create({ data: { ...input, userId: req.user!.id, jobId: job.id } });
+    return { job, policy };
+  });
+  const queued = await enqueuePolicyJob({ type: "SINGLE_POLICY", dbJobId: result.job.id, policyId: result.policy.id });
+  await prisma.job.update({ where: { id: result.job.id }, data: { bullJobId: String(queued.id) } });
+  await audit(req, "POLICY_SINGLE_ENQUEUE", { policyId: result.policy.id, jobId: result.job.id, plateNumber: input.plateNumber });
+  res.status(202).json({ jobId: result.job.id, policyId: result.policy.id, status: "QUEUED" });
+}));
+
+policyRouter.post("/excel", excelUpload.single("file"), asyncHandler(async (req, res) => {
+  if (!req.file) throw new AppError(400, "Vui lòng chọn file Excel");
+  let info;
+  try { info = inspectExcel(req.file.path); } catch (error) { throw error; }
+  const result = await prisma.$transaction(async (tx) => {
+    const job = await tx.job.create({ data: { userId: req.user!.id, type: JobType.EXCEL_UPLOAD, payload: { filePath: req.file!.path, originalName: req.file!.originalname, rowCount: info.rowCount } } });
+    const batch = await tx.batchUpload.create({ data: { userId: req.user!.id, jobId: job.id, filePath: req.file!.path, originalName: req.file!.originalname, totalRows: info.rowCount } });
+    return { job, batch };
+  });
+  const queued = await enqueuePolicyJob({ type: "EXCEL_UPLOAD", dbJobId: result.job.id, batchId: result.batch.id, filePath: req.file.path });
+  await prisma.job.update({ where: { id: result.job.id }, data: { bullJobId: String(queued.id) } });
+  await audit(req, "POLICY_EXCEL_ENQUEUE", { batchId: result.batch.id, jobId: result.job.id, fileName: path.basename(req.file.path), rows: info.rowCount });
+  res.status(202).json({ jobId: result.job.id, batchId: result.batch.id, totalRows: info.rowCount, status: "QUEUED" });
+}));
+policyRouter.get("/export", asyncHandler(async (req, res) => {
+  const user = req.user!;
+  const userIdQuery = req.query.userId ? String(req.query.userId) : undefined;
+  const own = user.role === UserRole.CTV ? { userId: user.id } : (userIdQuery ? { userId: userIdQuery } : {});
+  
+  const month = req.query.month ? Number(req.query.month) : undefined;
+  const year = req.query.year ? Number(req.query.year) : undefined;
+  
+  let dateFilter = {};
+  if (month && year) {
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 1);
+    dateFilter = {
+      issuedAt: {
+        gte: start,
+        lt: end
+      }
+    };
+  }
+
+  const where: Prisma.PolicyWhereInput = {
+    ...own,
+    ...dateFilter
+  };
+  
+  const policies = await prisma.policy.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    include: { user: { select: { fullName: true } } }
+  });
+
+  const exportData = policies.map((p) => ({
+    "CTV Phát Hành": p.user?.fullName || "",
+    "Họ Tên Chủ Xe": p.customerName,
+    "Biển Số": p.plateNumber,
+    "Số Khung": p.chassisNumber || "",
+    "Số Máy": p.engineNumber || "",
+    "Loại Xe": p.vehicleType || "",
+    "Số Chỗ Ngồi": p.seatCount || "",
+    "Số Khách NNTX": p.passengerCount || 0,
+    "Phí BH/1 Chỗ": p.passengerFee || 0,
+    "Số Điện Thoại": p.phone || "",
+    "Email": p.email || "",
+    "Địa Chỉ": p.address || "",
+    "Trạng Thái": p.status,
+    "Số Ấn Chỉ (GCN)": p.certificateNumber || "",
+    "Tổng Phí": p.premium ? Number(p.premium) : "",
+    "Ngày Phát Hành": p.issuedAt ? p.issuedAt.toISOString() : "",
+    "Ngày Tạo": p.createdAt.toISOString()
+  }));
+
+  const wb = xlsx.utils.book_new();
+  const ws = xlsx.utils.json_to_sheet(exportData);
+  xlsx.utils.book_append_sheet(wb, ws, "DanhSachDon");
+
+  const buffer = xlsx.write(wb, { type: "buffer", bookType: "xlsx" });
+
+  res.setHeader("Content-Disposition", 'attachment; filename="danh_sach_don.xlsx"');
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.send(buffer);
+}));
+
+policyRouter.get("/:id", asyncHandler(async (req, res) => {
+  const id = String(req.params.id);
+  const policy = assertFound(await prisma.policy.findUnique({ where: { id }, include: { user: { select: { username: true, fullName: true } }, job: true } }));
+  if (req.user!.role === UserRole.CTV && policy.userId !== req.user!.id) throw new AppError(403, "Bạn không có quyền xem đơn này");
+  res.json(policy);
+}));
+
+policyRouter.get("/:id/pdf", asyncHandler(async (req, res) => {
+  const id = String(req.params.id);
+  const policy = assertFound(await prisma.policy.findUnique({ where: { id } }));
+  if (req.user!.role === UserRole.CTV && policy.userId !== req.user!.id) throw new AppError(403, "Bạn không có quyền tải GCN");
+  if (!policy.pdfPath) throw new AppError(404, "GCN PDF chưa sẵn sàng");
+  
+  const cleanName = policy.plateNumber.toUpperCase().replace(/[^A-Z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+  res.download(path.resolve(policy.pdfPath), `${cleanName}.pdf`);
+}));

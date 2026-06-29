@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root { --background: 24 33% 98%; --foreground: 24 10% 12%; --primary: 24 95% 53%; --primary-foreground: 0 0% 100%; --muted: 30 20% 94%; --muted-foreground: 24 6% 44%; --border: 24 12% 88%; --destructive: 0 72% 51%; --destructive-foreground: 0 0% 100%; --radius: .75rem; }
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground antialiased; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+}

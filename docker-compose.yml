@@ -1,0 +1,84 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: diin_portal
+      POSTGRES_USER: diin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-diin_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U diin -d diin_portal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://diin:${POSTGRES_PASSWORD:-diin_password}@postgres:5432/diin_portal?schema=public
+      REDIS_URL: redis://redis:6379
+      PORT: 4000
+    command: sh -c "cd apps/api && npx prisma migrate deploy && node dist/src/server.js"
+    volumes:
+      - uploads_data:/app/uploads
+      - pdf_data:/app/downloads
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://diin:${POSTGRES_PASSWORD:-diin_password}@postgres:5432/diin_portal?schema=public
+      REDIS_URL: redis://redis:6379
+    command: node apps/api/dist/src/workers/diin.worker.js
+    volumes:
+      - uploads_data:/app/uploads
+      - pdf_data:/app/downloads
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads_data:
+  pdf_data:

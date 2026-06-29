@@ -1,0 +1,14 @@
+{
+  "name": "diin-ctv-portal",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "concurrently -n api,worker,web -c blue,magenta,green \"npm run dev -w @diin/api\" \"npm run worker -w @diin/api\" \"npm run dev -w @diin/web\"",
+    "build": "npm run build -w @diin/api && npm run build -w @diin/web",
+    "db:generate": "npm run prisma:generate -w @diin/api",
+    "db:migrate": "npm run prisma:migrate -w @diin/api",
+    "db:seed": "npm run prisma:seed -w @diin/api"
+  },
+  "devDependencies": {"concurrently": "^9.1.2"}
+}

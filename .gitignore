@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+uploads/*
+downloads/*
+!uploads/.gitkeep
+!downloads/.gitkeep
+apps/api/prisma/*.db
+playwright-report
+test-results
+*.log

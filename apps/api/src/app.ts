@@ -1,0 +1,31 @@
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import pinoHttpImport from "pino-http";
+import { env } from "./config/env.js";
+import { authenticate } from "./middleware/auth.js";
+import { errorHandler } from "./middleware/error-handler.js";
+import { authRouter } from "./modules/auth/auth.routes.js";
+import { dashboardRouter } from "./modules/dashboard/dashboard.routes.js";
+import { jobRouter } from "./modules/jobs/job.routes.js";
+import { policyRouter } from "./modules/policies/policy.routes.js";
+import { userRouter } from "./modules/users/user.routes.js";
+
+export const app = express();
+const pinoHttp = pinoHttpImport as unknown as () => express.RequestHandler;
+app.set("trust proxy", 1);
+app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use(cors({ origin: env.WEB_URL, credentials: true }));
+app.use(express.json({ limit: "1mb" }));
+app.use(pinoHttp());
+app.use("/api/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false }));
+
+app.get("/api/health", (_req, res) => res.json({ status: "ok", service: "diin-api" }));
+app.use("/api/auth", authRouter);
+app.use("/api/dashboard", authenticate, dashboardRouter);
+app.use("/api/users", authenticate, userRouter);
+app.use("/api/policies", authenticate, policyRouter);
+app.use("/api/jobs", authenticate, jobRouter);
+app.use((_req, res) => res.status(404).json({ message: "API không tồn tại", code: "NOT_FOUND" }));
+app.use(errorHandler);
