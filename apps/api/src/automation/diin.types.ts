@@ -28,4 +28,5 @@ export type SinglePolicyRecord = Pick<
   | "passengerFee"
   | "email"
   | "insuranceYears"
+  | "agent"
 >;

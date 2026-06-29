@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium, type Browser, type Locator, type Page } from "playwright";
+import * as XLSX from "xlsx";
 import { env } from "../config/env.js";
 import { AppError } from "../lib/errors.js";
 import { diinSelectors } from "./diin.selectors.js";
@@ -144,19 +145,15 @@ export class DiinService {
     }
     await page.locator("#EffectiveDate").fill(this.formatDate(effDate));
     await page.locator("#NumberYearInsure").fill(String(policy.insuranceYears ?? 1));
-    
-    // Tính phí để lấy số tiền thực tế
-    await page.locator("#btn-premium").click();
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(1000);
-    const premiumText = await page.locator("#Amount").inputValue().catch(() => "0");
-    const premium = this.parseMoney(premiumText) || 0;
+    if (policy.agent) {
+      await page.locator("#AgentName").fill(policy.agent);
+    }
     
     const submissionTime = new Date();
     // Bấm Lưu (Cổng DIIN tự động phát hành thẻ bảo hiểm)
     await page.locator("#btn-submit").click();
     await page.waitForLoadState("networkidle");
-    await page.waitForURL(url => url.pathname.includes("/DiinInsurance"), { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(10000); // Chờ 10s theo yêu cầu
     
     return this.collectByPlate(policy.plateNumber, policy.customerName, submissionTime);
   }
@@ -174,12 +171,13 @@ export class DiinService {
     await page.locator("#ReportFile").setInputFiles(path.resolve(filePath));
     await page.locator("#btn-submit").click();
     await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(3000); // Chờ 3s theo yêu cầu
     
     // Bấm Tính phí ở thanh công cụ bên trái (dùng .w-100 để không kích hoạt nhầm dòng trong bảng)
     const calcBtn = page.locator("button.w-100.ui-button", { hasText: "Tính phí" }).first();
     await calcBtn.click();
     await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(3000); // Chờ 3s theo yêu cầu
     
     // Bấm Phát hành ở thanh công cụ bên trái (dùng .w-100 để không kích hoạt nhầm dòng trong bảng)
     const issueBtn = page.locator("button.w-100.ui-button", { hasText: "Phát hành" }).first();
@@ -187,15 +185,44 @@ export class DiinService {
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(2000);
     
-    // Click Xác nhận phát hành trong modal popup xác nhận
+    // Click Xác nhận phát hành trong modal popup xác nhận (nếu có hiển thị)
     const confirmBtn = page.locator("#btn-phat-hanh").first();
     if (await confirmBtn.count()) {
-      await confirmBtn.click();
-      await page.waitForLoadState("networkidle");
-      await page.waitForTimeout(5000);
+      const isVisible = await confirmBtn.isVisible().catch(() => false);
+      if (isVisible) {
+        await confirmBtn.click().catch(() => {});
+        await page.waitForLoadState("networkidle");
+      }
     }
+
+    // Đọc các biển số và tên khách hàng từ file Excel để đối chiếu
+    const workbook = XLSX.readFile(path.resolve(filePath), { cellDates: true });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: "" });
     
-    return this.collectBatchRows();
+    const headers = (rows[0] as unknown[]).map(h => String(h || "").trim().toUpperCase().replace(/\s+/g, " "));
+    const plateIdx = headers.indexOf("BIỂN SỐ");
+    const nameIdx = headers.indexOf("HỌ TÊN CHỦ XE");
+    
+    const targets: { plateNumber: string; customerName: string }[] = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || !row.some(c => String(c ?? "").trim() !== "")) continue;
+      const plate = String(row[plateIdx] || "").trim();
+      const name = String(row[nameIdx] || "").trim();
+      if (plate) {
+        targets.push({ plateNumber: plate, customerName: name });
+      }
+    }
+
+    const submissionTime = new Date();
+    const results: IssuedPolicyResult[] = [];
+    for (const target of targets) {
+      const res = await this.collectByPlate(target.plateNumber, target.customerName, submissionTime);
+      results.push(res);
+    }
+    return results;
   }
 
   private async collectByPlate(plateNumber: string, fallbackName: string, submissionTime: Date): Promise<IssuedPolicyResult> {
@@ -207,8 +234,8 @@ export class DiinService {
 
     const targetKey = plateNumber.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-    // Chờ tối đa 30 giây để DIIN sinh số Ấn chỉ (số Seri)
-    for (let attempt = 0; attempt < 6; attempt++) {
+    // Chờ tối đa 60 giây để DIIN sinh số Ấn chỉ (số Seri)
+    for (let attempt = 0; attempt < 10; attempt++) {
       await page.goto(`${env.DIIN_BASE_URL}${diinSelectors.links.issuedCars}`, { waitUntil: "networkidle" });
       const search = page.locator("#search");
       if (await search.count()) {
@@ -279,71 +306,6 @@ export class DiinService {
     return { ...result, ...(await this.captureCertificate(matchedRow, certificateNumber ?? plateNumber)) };
   }
 
-  private async collectBatchRows(): Promise<IssuedPolicyResult[]> {
-    const page = this.activePage;
-    let results: IssuedPolicyResult[] = [];
-    
-    // Đợi lưới dữ liệu tải xong ít nhất 1 dòng
-    await page.locator("tr.jqgrow").first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
-
-    // Chờ tối đa 30 giây để tất cả các dòng đều có số Seri (Seri Ac)
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const rows = page.locator("tr.jqgrow");
-      const count = await rows.count();
-      results = [];
-      let allHaveSeri = true;
-
-      for (let i = 0; i < count; i++) {
-        const row = rows.nth(i);
-        const cells = (await row.locator("td").allInnerTexts()).map((x) => x.trim());
-        if (!cells.length) continue;
-        
-        const certificateNumber = cells.find((x) => /D?\d{2}-\d{2}-\d{5,8}-\d+/i.test(x));
-        const plateNumber = cells.find((x) => /\d{2}[A-Z]-?[\d.]+/i.test(x)) ?? "UNKNOWN";
-        const customerName = cells.find((x) => {
-          const clean = x.trim();
-          return /[A-ZÀ-Ỹ]{2,}\s+[A-ZÀ-Ỹ]{2,}/i.test(clean) && 
-                 !/GCN|Tái tục|Phát hành|Hủy|TNDS|Bảo hiểm/i.test(clean);
-        }) || "";
-        
-        if (!certificateNumber) {
-          allHaveSeri = false;
-        }
-
-        results.push({
-          plateNumber,
-          customerName,
-          certificateNumber
-        });
-      }
-
-      if (allHaveSeri && results.length > 0) {
-        break;
-      }
-      
-      console.log(`Chờ sinh số Seri cho bảng kê, thử lại lần thứ ${attempt + 1}...`);
-      await page.waitForTimeout(5000);
-      await page.reload({ waitUntil: "networkidle" });
-      await page.locator("tr.jqgrow").first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
-    }
-
-    // Sau khi đã có (hoặc hết thời gian chờ), tải PDF cho từng dòng
-    const finalResults: IssuedPolicyResult[] = [];
-    await page.locator("tr.jqgrow").first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
-    const rows = page.locator("tr.jqgrow");
-    const count = await rows.count();
-    for (let i = 0; i < count; i++) {
-      const row = rows.nth(i);
-      const base = results[i];
-      if (!base) continue;
-      const certInfo = await this.captureCertificate(row, base.certificateNumber ?? `${Date.now()}-${i}`);
-      finalResults.push({ ...base, ...certInfo });
-    }
-
-    if (!finalResults.length) throw new AppError(502, "DIIN không trả về dòng kết quả sau phát hành", "DIIN_EMPTY_RESULT");
-    return finalResults;
-  }
-
   private async captureCertificate(row: Locator, fileStem: string) {
     const gcn = row.getByText(diinSelectors.buttons.certificate).first();
     let pdfUrl: string | undefined;
@@ -396,14 +358,23 @@ export class DiinService {
   private parseMoney(value?: string) { return value ? Number(value.replace(/\./g, "").replace(/,/g, ".")) : undefined; }
 
   private parseDiinDate(dateStr: string): Date | null {
-    const match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?/);
+    const cleanStr = dateStr.toUpperCase().replace(/\s+/g, " ");
+    const match = cleanStr.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?(?:\s+(SÁNG|CHIỀU|AM|PM))?/);
     if (!match) return null;
-    const [_, day, month, year, hour, minute, second] = match;
+    const [_, day, month, year, hour, minute, second, period] = match;
+    let h = parseInt(hour, 10);
+    if (period) {
+      if ((period === "CHIỀU" || period === "PM") && h < 12) {
+        h += 12;
+      } else if ((period === "SÁNG" || period === "AM") && h === 12) {
+        h = 0;
+      }
+    }
     return new Date(
       parseInt(year, 10),
       parseInt(month, 10) - 1,
       parseInt(day, 10),
-      parseInt(hour, 10),
+      h,
       parseInt(minute, 10),
       second ? parseInt(second, 10) : 0
     );
