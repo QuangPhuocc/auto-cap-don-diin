@@ -58,7 +58,7 @@ const commands = [
   "npx playwright install chromium --with-deps",
 
   // 9. Start applications under PM2
-  "cd /root/auto-cap-don-diin/apps/api && pm2 start dist/server.js --name diin-api",
+  "cd /root/auto-cap-don-diin/apps/api && pm2 start dist/src/server.js --name diin-api",
   "cd /root/auto-cap-don-diin/apps/web && pm2 start 'npx vite preview --host 0.0.0.0 --port 5173' --name diin-web",
   
   // 10. Save PM2 state
