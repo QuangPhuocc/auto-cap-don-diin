@@ -24,49 +24,49 @@ ADMIN_FULL_NAME=Quản trị viên
 `;
 
 const commands = [
-  // 1. Dừng các tiến trình cũ
+  // 1. Stop existing processes
   "pm2 delete all || true",
   "pkill -f Quan-li-TGI-CN-Gia-Lai || true",
   "pkill -f node || true",
   "pkill -f vite || true",
   
-  // 2. Cài đặt pnpm toàn cục
+  // 2. Install pnpm globally
   "npm i -g pnpm",
   
-  // 3. Clone code mới về VPS
+  // 3. Clone fresh repository code
   "rm -rf /root/auto-cap-don-diin",
   "git clone https://github.com/QuangPhuocc/auto-cap-don-diin.git /root/auto-cap-don-diin",
   
-  // 4. Viết file .env vào thư mục gốc và apps/api
+  // 4. Write env configurations
   `cat << 'EOF' > /root/auto-cap-don-diin/.env\n${envContent}\nEOF`,
   `cat << 'EOF' > /root/auto-cap-don-diin/apps/api/.env\n${envContent}\nEOF`,
 
-  // 5. Cài đặt các gói thư viện
+  // 5. Install libraries
   "cd /root/auto-cap-don-diin && pnpm install --no-frozen-lockfile",
 
-  // 6. Biên dịch ứng dụng
+  // 6. Build the workspaces
   "cd /root/auto-cap-don-diin && pnpm run build",
 
-  // 7. Đồng bộ database SQLite & Seed dữ liệu admin/ctv
+  // 7. Sync SQLite database
   "cd /root/auto-cap-don-diin/apps/api && npx prisma db push --accept-data-loss",
   "cd /root/auto-cap-don-diin/apps/api && npx prisma db seed",
 
-  // 8. Cài đặt các trình duyệt Chromium và các thư viện cần thiết cho Playwright
+  // 8. Playwright browsers and system deps
   "npx playwright install chromium --with-deps",
 
-  // 9. Chạy ứng dụng bằng PM2
+  // 9. Start applications under PM2
   "cd /root/auto-cap-don-diin/apps/api && pm2 start dist/server.js --name diin-api",
   "cd /root/auto-cap-don-diin/apps/web && pm2 start 'npx vite preview --host 0.0.0.0 --port 5173' --name diin-web",
   
-  // 10. Lưu lại danh sách PM2
+  // 10. Save PM2 state
   "pm2 save",
   
-  // 11. Kiểm tra trạng thái PM2
+  // 11. View status
   "pm2 list"
 ];
 
 conn.on("ready", () => {
-  console.log("SSH Connected successfully! Starting deployment steps...\n");
+  console.log("SSH Connection ready for deployment...\n");
   
   let i = 0;
   function runNext() {
@@ -80,7 +80,7 @@ conn.on("ready", () => {
     console.log(`[EXECUTE] ${cmd.split("\n")[0]}`);
     conn.exec(cmd, (err, stream) => {
       if (err) {
-        console.error(`Error running command: ${cmd}`, err);
+        console.error(`Error: ${cmd}`, err);
         conn.end();
         return;
       }
@@ -88,9 +88,9 @@ conn.on("ready", () => {
         console.log(`[FINISHED] code: ${code}\n`);
         i++;
         runNext();
-      }).on("data", (data: Buffer) => {
+      }).on("data", (data) => {
         process.stdout.write(data);
-      }).stderr.on("data", (data: Buffer) => {
+      }).stderr.on("data", (data) => {
         process.stderr.write(data);
       });
     });
