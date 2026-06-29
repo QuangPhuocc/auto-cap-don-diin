@@ -3,6 +3,7 @@ import { DiinService } from "../automation/diin.service.js";
 import { prisma } from "../lib/prisma.js";
 import type { PolicyQueueData } from "../queue/policy.queue.js";
 import XLSX from "xlsx";
+import path from "node:path";
 
 function parseExcelPolicies(filePath: string): Record<string, any> {
   const workbook = XLSX.readFile(filePath, { cellDates: true });
@@ -152,6 +153,12 @@ export async function processPolicyJob(data: PolicyQueueData) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    try {
+      await diin.captureScreenshot(path.resolve("screenshot-error.png"));
+      console.log("Captured error screenshot to screenshot-error.png");
+    } catch (screenshotError) {
+      console.error("Failed to capture error screenshot:", screenshotError);
+    }
     await prisma.job.update({ where: { id: data.dbJobId }, data: { status: JobStatus.FAILED, error: message } });
     if (data.type === "SINGLE_POLICY") {
       await prisma.policy.update({ where: { id: data.policyId }, data: { status: PolicyStatus.FAILED, error: message } });

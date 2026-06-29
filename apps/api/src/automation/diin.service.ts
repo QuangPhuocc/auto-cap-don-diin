@@ -33,6 +33,12 @@ export class DiinService {
     this.page = undefined;
   }
 
+  async captureScreenshot(outputPath: string) {
+    if (this.page) {
+      await this.page.screenshot({ path: outputPath, fullPage: true });
+    }
+  }
+
   private get activePage() {
     if (!this.page) throw new Error("DIIN browser chưa được khởi tạo");
     return this.page;
