@@ -195,17 +195,7 @@ export class DiinService {
     const issueBtn = page.locator("button.w-100.ui-button", { hasText: "Phát hành" }).first();
     await issueBtn.click();
     await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(2000);
-    
-    // Click Xác nhận phát hành trong modal popup xác nhận (nếu có hiển thị)
-    const confirmBtn = page.locator("#btn-phat-hanh").first();
-    if (await confirmBtn.count()) {
-      const isVisible = await confirmBtn.isVisible().catch(() => false);
-      if (isVisible) {
-        await confirmBtn.click().catch(() => {});
-        await page.waitForLoadState("networkidle");
-      }
-    }
+    await page.waitForTimeout(3000); // Chờ 3s sau khi click Phát hành
 
     // Đọc các biển số và tên khách hàng từ file Excel để đối chiếu
     const workbook = XLSX.readFile(path.resolve(filePath), { cellDates: true });
