@@ -274,9 +274,10 @@ export class DiinService {
           if (dateCell) {
             const diinDate = this.parseDiinDate(dateCell);
             if (diinDate) {
-              const diffMs = Math.abs(diinDate.getTime() - submissionTime.getTime());
-              // Cho phép chênh lệch tối đa 90 giây (đề phòng giây lệch và làm tròn phút trên cổng DIIN)
-              if (diffMs <= 90000) {
+              const diffMsRaw = Math.abs(diinDate.getTime() - submissionTime.getTime());
+              const diffMs = diffMsRaw % (12 * 60 * 60 * 1000);
+              const closestDiffMs = Math.min(diffMs, 12 * 60 * 60 * 1000 - diffMs);
+              if (closestDiffMs <= 90000 && diffMsRaw <= 13 * 60 * 60 * 1000) {
                 matchedRow = r;
                 cells = rowCells;
                 break;
@@ -382,7 +383,7 @@ export class DiinService {
         h = 0;
       }
     }
-    return new Date(
+    const utcMs = Date.UTC(
       parseInt(year, 10),
       parseInt(month, 10) - 1,
       parseInt(day, 10),
@@ -390,5 +391,6 @@ export class DiinService {
       parseInt(minute, 10),
       second ? parseInt(second, 10) : 0
     );
+    return new Date(utcMs - 7 * 60 * 60 * 1000);
   }
 }
