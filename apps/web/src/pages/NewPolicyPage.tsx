@@ -125,8 +125,17 @@ export function NewPolicyPage() {
               {/* Dòng 1: Cấu hình động theo tài khoản */}
               {isSpecialUser ? (
                 <>
-                  <div className="md:col-span-2">
-                    <Field label="Người cấp" name="issuerName" defaultValue={user?.fullName || ""} />
+                  <div className="md:col-span-2 space-y-2">
+                    <Label htmlFor="issuerName">Người cấp</Label>
+                    <Input id="issuerName" name="issuerName" list="issuers" defaultValue={user?.fullName || ""} required />
+                    <datalist id="issuers">
+                      <option value="PHƯỚC" />
+                      <option value="LINH" />
+                      <option value="NHI" />
+                      <option value="DIỄM" />
+                      <option value="YÊN" />
+                      <option value="DUY THƯƠNG" />
+                    </datalist>
                   </div>
                   <div className="md:col-span-2">
                     <Field label="Đại lý" name="agent" required={false} />
