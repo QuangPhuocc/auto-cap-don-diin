@@ -111,6 +111,8 @@ export function NewPolicyPage() {
         body: JSON.stringify(body)
       });
       setMessage({ ok: true, text: "Đã phát hành" });
+      localStorage.setItem("hasNewPolicy", "true");
+      window.dispatchEvent(new Event("newPolicyIssued"));
       form.reset();
     } catch (err) {
       setMessage({

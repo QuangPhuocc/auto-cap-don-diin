@@ -1,6 +1,6 @@
 import { BarChart3, FilePlus2, Files, LogOut, Menu, Sheet, Users, X, User } from "lucide-react";
-import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { cn } from "../lib/utils";
 import { Button } from "./ui";
@@ -19,7 +19,30 @@ const roleText: Record<string, string> = {
 };
 
 export function AppLayout() {
-  const { user, logout } = useAuth(); const [open, setOpen] = useState(false);
+  const { user, logout } = useAuth();
+  const [open, setOpen] = useState(false);
+  const location = useLocation();
+  const [hasNewPolicy, setHasNewPolicy] = useState(
+    localStorage.getItem("hasNewPolicy") === "true"
+  );
+
+  useEffect(() => {
+    const handleNewPolicy = () => {
+      setHasNewPolicy(true);
+    };
+    window.addEventListener("newPolicyIssued", handleNewPolicy);
+    return () => {
+      window.removeEventListener("newPolicyIssued", handleNewPolicy);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (location.pathname === "/policies") {
+      localStorage.removeItem("hasNewPolicy");
+      setHasNewPolicy(false);
+    }
+  }, [location.pathname]);
+
   const nav = [...links, ...(user?.role === "ADMIN" || user?.role === "MANAGER" ? [{ to: "/users", label: "Quản lý tài khoản", icon: Users }] : [])];
   
   return <div className="min-h-screen bg-stone-50">
@@ -36,12 +59,45 @@ export function AppLayout() {
           <Button className="lg:hidden" variant="ghost" size="icon" onClick={()=>setOpen(false)}><X size={18}/></Button>
         </div>
         <nav className="space-y-1 p-2">
-          {nav.map(({to,label,icon:Icon})=>(
-            <NavLink key={to} to={to} end={to==="/"} onClick={()=>setOpen(false)} className={({isActive})=>cn("flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium whitespace-nowrap",isActive?"bg-orange-50 text-orange-700":"text-stone-600 hover:bg-stone-100")}>
-              <Icon size={18} className="shrink-0" />
-              <span className={cn("transition-opacity duration-200", open ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>{label}</span>
-            </NavLink>
-          ))}
+          {nav.map(({to,label,icon:Icon}) => {
+            const isPolicies = to === "/policies";
+            const highlight = isPolicies && hasNewPolicy;
+
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                end={to==="/"}
+                onClick={() => {
+                  setOpen(false);
+                  if (isPolicies) {
+                    localStorage.removeItem("hasNewPolicy");
+                    setHasNewPolicy(false);
+                  }
+                }}
+                className={({isActive}) => {
+                  if (isActive) {
+                    return "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-bold whitespace-nowrap bg-orange-50 text-orange-700";
+                  }
+                  if (highlight) {
+                    return "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold whitespace-nowrap bg-red-50 text-red-700 animate-pulse border border-red-200";
+                  }
+                  return "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium whitespace-nowrap text-stone-600 hover:bg-stone-100";
+                }}
+              >
+                <span className="relative flex items-center justify-center">
+                  <Icon size={18} className="shrink-0" />
+                  {highlight && (
+                    <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                    </span>
+                  )}
+                </span>
+                <span className={cn("transition-opacity duration-200", open ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>{label}</span>
+              </NavLink>
+            );
+          })}
         </nav>
       </div>
       
