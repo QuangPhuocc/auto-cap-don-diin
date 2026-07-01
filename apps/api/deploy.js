@@ -5,7 +5,7 @@ const conn = new Client();
 const envContent = `NODE_ENV=production
 PORT=4000
 WEB_URL=http://103.211.200.219:5173
-DATABASE_URL=file:/var/database/dev.db
+DATABASE_URL=file:/var/database/dev.db?connection_limit=1&busy_timeout=30000
 REDIS_URL=redis://127.0.0.1:6379
 JWT_SECRET=diin-local-dev-secret-0941941049-allow-real-issue
 JWT_EXPIRES_IN=8h
