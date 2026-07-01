@@ -8,7 +8,6 @@ import { Button } from "./ui";
 const links = [
   { to: "/", label: "Tổng quan", icon: BarChart3 },
   { to: "/policies/new", label: "Tạo đơn lẻ", icon: FilePlus2 },
-  { to: "/policies/upload", label: "Upload Excel", icon: Sheet },
   { to: "/policies", label: "Danh sách đơn", icon: Files }
 ];
 

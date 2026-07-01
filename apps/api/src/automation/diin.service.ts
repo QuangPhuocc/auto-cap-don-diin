@@ -165,7 +165,7 @@ export class DiinService {
     // Bấm Lưu (Cổng DIIN tự động phát hành thẻ bảo hiểm)
     await page.locator("#btn-submit").click();
     await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(10000); // Chờ 10s theo yêu cầu
+    await page.waitForTimeout(2000); // Chờ 2s để server ghi nhận, sau đó robot sẽ bắt đầu quét ngay
     
     return this.collectByPlate(policy.plateNumber, policy.customerName, submissionTime);
   }
