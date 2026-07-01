@@ -24,7 +24,22 @@ authRouter.post("/login", asyncHandler(async (req, res) => {
   });
   req.user = { id: user.id, username: user.username, fullName: user.fullName, role: user.role };
   await audit(req, "AUTH_LOGIN");
-  res.json({ token, user: req.user });
+  res.json({
+    token,
+    user: {
+      id: user.id,
+      username: user.username,
+      fullName: user.fullName,
+      phone: user.phone,
+      role: user.role
+    }
+  });
 }));
 
-authRouter.get("/me", authenticate, asyncHandler(async (req, res) => res.json({ user: req.user })));
+authRouter.get("/me", authenticate, asyncHandler(async (req, res) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.user!.id },
+    select: { id: true, username: true, fullName: true, phone: true, role: true, status: true }
+  });
+  res.json({ user });
+}));

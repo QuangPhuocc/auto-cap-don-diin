@@ -51,7 +51,7 @@ userRouter.get("/", asyncHandler(async (req, res) => {
     where.creatorId = req.user!.id;
   }
   const [items, total] = await Promise.all([
-    prisma.user.findMany({ where, select: { id: true, username: true, fullName: true, phone: true, role: true, status: true, createdAt: true }, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit }),
+    prisma.user.findMany({ where, select: { id: true, username: true, fullName: true, phone: true, role: true, status: true, createdAt: true }, orderBy: [{ role: "asc" }, { createdAt: "desc" }], skip: (page - 1) * limit, take: limit }),
     prisma.user.count({ where })
   ]);
 

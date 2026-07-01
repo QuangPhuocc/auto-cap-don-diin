@@ -88,15 +88,15 @@ export function UsersPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Tên đăng nhập</Label>
-                  <Input name="username" required />
+                  <Input name="username" required autoComplete="new-username" />
                 </div>
                 <div className="space-y-2">
                   <Label>Số điện thoại</Label>
-                  <Input name="phone" />
+                  <Input name="phone" autoComplete="off" />
                 </div>
                 <div className="space-y-2">
                   <Label>Mật khẩu</Label>
-                  <Input name="password" type="password" minLength={8} required />
+                  <Input name="password" type="password" minLength={8} required autoComplete="new-password" />
                 </div>
                 <div className="space-y-2">
                   <Label>Vai trò</Label>
@@ -130,15 +130,15 @@ export function UsersPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Tên đăng nhập</Label>
-                  <Input name="username" defaultValue={editingUser.username} required />
+                  <Input name="username" defaultValue={editingUser.username} required autoComplete="new-username" />
                 </div>
                 <div className="space-y-2">
                   <Label>Số điện thoại</Label>
-                  <Input name="phone" defaultValue={editingUser.phone || ""} />
+                  <Input name="phone" defaultValue={editingUser.phone || ""} autoComplete="off" />
                 </div>
                 <div className="space-y-2">
                   <Label>Mật khẩu mới (để trống nếu không đổi)</Label>
-                  <Input name="password" type="password" minLength={8} placeholder="••••••••" />
+                  <Input name="password" type="password" minLength={8} placeholder="••••••••" autoComplete="new-password" />
                 </div>
                 <div className="space-y-2">
                   <Label>Vai trò</Label>

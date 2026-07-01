@@ -1,5 +1,5 @@
 import { Save } from "lucide-react";
-import { useState, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "../components/ui";
@@ -7,8 +7,15 @@ import type { User } from "../lib/types";
 
 export function ProfilePage() {
   const { user, updateUser } = useAuth();
-  const [fullName, setFullName] = useState(user?.fullName ?? "");
-  const [phone, setPhone] = useState(user?.phone ?? "");
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
+
+  useEffect(() => {
+    if (user) {
+      setFullName(user.fullName ?? "");
+      setPhone(user.phone ?? "");
+    }
+  }, [user]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
