@@ -9,6 +9,21 @@ import { prisma } from "../../lib/prisma.js";
 import { authorize } from "../../middleware/auth.js";
 
 export const userRouter = Router();
+
+userRouter.patch("/profile", asyncHandler(async (req, res) => {
+  const profileSchema = z.object({
+    fullName: z.string().min(2).max(255).optional(),
+    phone: z.string().max(20).optional().nullable()
+  });
+  const input = profileSchema.parse(req.body);
+  const user = await prisma.user.update({
+    where: { id: req.user!.id },
+    data: input,
+    select: { id: true, username: true, fullName: true, phone: true, role: true, status: true, createdAt: true }
+  });
+  res.json(user);
+}));
+
 userRouter.use(authorize(UserRole.ADMIN, UserRole.MANAGER));
 
 const createSchema = z.object({

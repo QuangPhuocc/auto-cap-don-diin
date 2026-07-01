@@ -45,11 +45,20 @@ export function NewPolicyPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
-  // Default values
+  // Default values: cộng 10 phút, làm tròn về đuôi 5 hoặc 10
   const now = new Date();
-  const defaultDate = now.toISOString().split("T")[0];
-  const defaultHour = String(now.getHours()).padStart(2, "0");
-  const defaultMinute = String(now.getMinutes()).padStart(2, "0");
+  const target = new Date(now.getTime() + 10 * 60 * 1000);
+  let m = target.getMinutes();
+  let roundedM = Math.ceil(m / 5) * 5;
+  if (roundedM === 60) {
+    target.setHours(target.getHours() + 1);
+    roundedM = 0;
+  }
+  target.setMinutes(roundedM);
+
+  const defaultDate = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-${String(target.getDate()).padStart(2, "0")}`;
+  const defaultHour = String(target.getHours()).padStart(2, "0");
+  const defaultMinute = String(target.getMinutes()).padStart(2, "0");
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -75,7 +84,7 @@ export function NewPolicyPage() {
         method: "POST",
         body: JSON.stringify(body)
       });
-      setMessage({ ok: true, text: `Đã xếp hàng xử lý thành công. Mã job: ${r.jobId}` });
+      setMessage({ ok: true, text: "Đã phát hành" });
       form.reset();
     } catch (err) {
       setMessage({
@@ -100,53 +109,52 @@ export function NewPolicyPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={submit} className="space-y-6">
+            {/* Ẩn Giới tính (mặc định NAM) và Email (mặc định qphuocins@gmail.com) */}
+            <input type="hidden" name="gender" value="NAM" />
+            <input type="hidden" name="email" value="qphuocins@gmail.com" />
+
             <div className="grid gap-4 md:grid-cols-2">
               
-              {/* Họ tên & Giới tính */}
+              {/* 1. Số điện thoại nhận GCN */}
+              <Field label="Số điện thoại nhận GCN" name="phone" />
+
+              {/* 2. Họ tên chủ xe */}
               <Field label="Họ tên chủ xe" name="customerName" />
-              <div className="space-y-2">
-                <Label htmlFor="gender">Giới tính</Label>
-                <Select id="gender" name="gender" required defaultValue="NAM">
-                  <option value="NAM">Nam</option>
-                  <option value="NỮ">Nữ</option>
-                </Select>
-              </div>
 
-              {/* Địa chỉ */}
+              {/* 3. Địa chỉ trên đăng ký */}
               <div className="md:col-span-2">
-                <Field label="Địa chỉ" name="address" />
+                <Field label="Địa chỉ trên đăng ký" name="address" />
               </div>
 
-              {/* Biển số */}
+              {/* 4. Biển số */}
               <Field label="Biển số" name="plateNumber" />
 
-              {/* Số khung */}
+              {/* 5. Số khung */}
               <Field label="Số khung" name="chassisNumber" />
 
-              {/* Số máy */}
+              {/* 6. Số máy */}
               <Field label="Số máy" name="engineNumber" />
 
-              {/* Loại xe */}
+              {/* 7. Loại xe (Mặc định chọn xe ô tô không KD) */}
               <div className="space-y-2">
                 <Label htmlFor="vehicleType">Loại xe</Label>
-                <Select id="vehicleType" name="vehicleType" required defaultValue="">
-                  <option value="" disabled>Chọn loại xe</option>
+                <Select id="vehicleType" name="vehicleType" required defaultValue="XE Ô TÔ KHÔNG KD VẬN TẢI & XE BUÝT">
                   {vehicleTypes.map((v) => (
                     <option key={v} value={v}>{v}</option>
                   ))}
                 </Select>
               </div>
 
-              {/* Số chỗ ngồi */}
+              {/* 8. Số chỗ ngồi */}
               <Field label="Số chỗ ngồi" name="seatCount" type="number" required defaultValue={5} />
 
-              {/* Ngày bắt đầu hiệu lực */}
+              {/* 9. Ngày bắt đầu hiệu lực */}
               <div className="space-y-2">
                 <Label htmlFor="effectiveDate">Ngày bắt đầu hiệu lực</Label>
                 <Input id="effectiveDate" name="effectiveDate" type="date" required defaultValue={defaultDate} />
               </div>
 
-              {/* Giờ & Phút */}
+              {/* 10. Giờ & Phút hiệu lực */}
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-2">
                   <Label htmlFor="effectiveHour">Giờ hiệu lực</Label>
@@ -160,15 +168,15 @@ export function NewPolicyPage() {
                 <div className="space-y-2">
                   <Label htmlFor="effectiveMinute">Phút hiệu lực</Label>
                   <Select id="effectiveMinute" name="effectiveMinute" required defaultValue={defaultMinute}>
-                    {Array.from({ length: 60 }).map((_, i) => {
-                      const m = String(i).padStart(2, "0");
+                    {Array.from({ length: 12 }).map((_, i) => {
+                      const m = String(i * 5).padStart(2, "0");
                       return <option key={m} value={m}>{m} phút</option>;
                     })}
                   </Select>
                 </div>
               </div>
 
-              {/* Số năm bảo hiểm */}
+              {/* 11. Số năm bảo hiểm */}
               <div className="space-y-2">
                 <Label htmlFor="insuranceYears">Số năm bảo hiểm</Label>
                 <Select id="insuranceYears" name="insuranceYears" required defaultValue={1}>
@@ -178,10 +186,10 @@ export function NewPolicyPage() {
                 </Select>
               </div>
 
-              {/* Số hành khách được bảo hiểm (NNTX) */}
+              {/* 12. Số chỗ mua NNTX */}
               <Field label="Số chỗ mua NNTX" name="passengerCount" type="number" required defaultValue={0} />
 
-              {/* Phí bảo hiểm/ 1 chỗ ngồi */}
+              {/* 13. Phí bảo hiểm/ 1 chỗ ngồi (NNTX) */}
               <div className="space-y-2">
                 <Label htmlFor="passengerFee">Phí bảo hiểm/ 1 chỗ ngồi (NNTX)</Label>
                 <Select id="passengerFee" name="passengerFee" required defaultValue={0}>
@@ -191,12 +199,8 @@ export function NewPolicyPage() {
                 </Select>
               </div>
 
-              {/* Email, SDT, Dai ly */}
-              <div className="md:col-span-2 grid gap-4 grid-cols-1 md:grid-cols-3">
-                <Field label="Email nhận GCN" name="email" type="email" required={false} />
-                <Field label="Số điện thoại nhận GCN" name="phone" />
-                <Field label="Đại lý" name="agent" required={false} />
-              </div>
+              {/* 14. Đại lý */}
+              <Field label="Đại lý" name="agent" required={false} />
 
             </div>
 
