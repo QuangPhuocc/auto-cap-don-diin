@@ -103,7 +103,7 @@ export async function processPolicyJob(data: PolicyQueueData) {
       const result = await diin.issueSingle(policy);
       await prisma.policy.update({
         where: { id: policy.id },
-        data: { ...result, status: PolicyStatus.ISSUED, issuedAt: new Date() }
+        data: { ...result, status: PolicyStatus.ISSUED, issuedAt: new Date(), error: null }
       });
     } else {
       const batch = await prisma.batchUpload.update({

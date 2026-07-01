@@ -283,6 +283,16 @@ function UserPoliciesList({ user, onBack }: { user: User; onBack: () => void }) 
     return plate.toUpperCase().replace(/[^A-Z0-9\s]/g, "").replace(/\s+/g, " ").trim();
   };
 
+  const cleanGCN = (gcn: string | null | undefined) => {
+    if (!gcn) return "—";
+    const parts = gcn.split("_");
+    if (parts.length > 1) {
+      const lastPart = parts[parts.length - 1];
+      return lastPart.replace(/\.pdf$/i, "");
+    }
+    return gcn.replace(/\.pdf$/i, "");
+  };
+
   useEffect(load, [status, selectedMonth, selectedYear]);
 
   const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -382,11 +392,11 @@ function UserPoliciesList({ user, onBack }: { user: User; onBack: () => void }) 
                     <div className="font-medium">{p.customerName}</div>
                   </td>
                   <td className="p-3 font-mono">{p.plateNumber}</td>
-                  <td className="p-3 font-mono text-xs">{p.certificateNumber ?? "—"}</td>
+                  <td className="p-3 font-mono text-xs">{cleanGCN(p.certificateNumber)}</td>
                   <td className="p-3">{p.premium ? money(p.premium) : "—"}</td>
                   <td className="p-3">
                     <Badge className={statusStyle[p.status]}>{statusText[p.status]}</Badge>
-                    {p.error && <div className="mt-1 max-w-xs truncate text-xs text-red-600" title={p.error}>{p.error}</div>}
+                    {p.status !== "ISSUED" && p.error && <div className="mt-1 max-w-xs truncate text-xs text-red-600" title={p.error}>{p.error}</div>}
                   </td>
                   <td className="p-3 text-muted-foreground">{dateTime(p.createdAt)}</td>
                   <td className="p-3">
