@@ -166,10 +166,19 @@ policyRouter.get("/export", asyncHandler(async (req, res) => {
       const year = d.getFullYear();
       return `${day}/${month}/${year}`;
     };
+    const cleanGCN = (gcn: string | null | undefined) => {
+      if (!gcn) return "";
+      const parts = gcn.split("_");
+      if (parts.length > 1) {
+        const lastPart = parts[parts.length - 1];
+        return lastPart.replace(/\.pdf$/i, "");
+      }
+      return gcn.replace(/\.pdf$/i, "");
+    };
 
     return {
       "STT": index + 1,
-      "GCN": p.certificateNumber || "",
+      "GCN": cleanGCN(p.certificateNumber),
       "TÊN KHÁCH HÀNG": p.customerName,
       "BIỂN SỐ": p.plateNumber,
       "NGÀY CẤP": formatDate(p.issuedAt),

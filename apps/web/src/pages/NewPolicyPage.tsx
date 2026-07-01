@@ -190,7 +190,7 @@ export function NewPolicyPage() {
                     <Field label="Đại lý" name="agent" required={false} />
                   </div>
                   <div className="md:col-span-2">
-                    <Field label="Số điện thoại nhận GCN" name="phone" />
+                    <Field label="Số điện thoại nhận GCN" name="phone" required={false} />
                   </div>
                 </>
               ) : (
@@ -199,7 +199,7 @@ export function NewPolicyPage() {
                     <Field label="Đại lý" name="agent" required={false} />
                   </div>
                   <div className="md:col-span-3">
-                    <Field label="Số điện thoại nhận GCN" name="phone" />
+                    <Field label="Số điện thoại nhận GCN" name="phone" required={false} />
                   </div>
                 </>
               )}

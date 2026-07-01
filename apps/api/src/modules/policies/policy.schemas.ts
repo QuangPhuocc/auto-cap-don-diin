@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const singlePolicySchema = z.object({
   customerName: z.string().min(2).max(255),
-  phone: z.string().min(8).max(30),
+  phone: z.string().max(30).optional().nullable().or(z.literal("")),
   address: z.string().min(2).max(1000),
   plateNumber: z.string().min(3).max(50).transform((v) => v.trim().toUpperCase()),
   chassisNumber: z.string().min(3).max(100).transform((v) => v.trim().toUpperCase()),
