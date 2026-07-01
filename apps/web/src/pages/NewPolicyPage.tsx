@@ -1,5 +1,5 @@
 import { Send } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, useEffect } from "react";
 import { api } from "../lib/api";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Select } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
@@ -52,6 +52,24 @@ export function NewPolicyPage() {
       ["LINH", "PHƯỚC", "YÊN", "DIỄM", "NHI"].includes(user.fullName.toUpperCase()) ||
       ["0962731468", "0906643381", "0942542249", "0981740680", "0931183389"].includes(user.username)
     : false;
+
+  const defaultList = ["PHƯỚC", "LINH", "NHI", "DIỄM", "YÊN", "DUY THƯƠNG"];
+  const [issuerMode, setIssuerMode] = useState<"select" | "custom">("select");
+  const [selectedIssuer, setSelectedIssuer] = useState<string>("");
+  const [customIssuer, setCustomIssuer] = useState<string>("");
+
+  useEffect(() => {
+    if (user) {
+      const uName = user.fullName.toUpperCase();
+      if (defaultList.includes(uName)) {
+        setIssuerMode("select");
+        setSelectedIssuer(uName);
+      } else {
+        setIssuerMode("custom");
+        setCustomIssuer(user.fullName);
+      }
+    }
+  }, [user]);
 
   // Default values: cộng 10 phút, làm tròn về đuôi 5 hoặc 10
   const now = new Date();
@@ -125,18 +143,49 @@ export function NewPolicyPage() {
               {/* Dòng 1: Cấu hình động theo tài khoản */}
               {isSpecialUser ? (
                 <>
-                  <div className="md:col-span-2 space-y-2">
-                    <Label htmlFor="issuerName">Người cấp</Label>
-                    <Input id="issuerName" name="issuerName" list="issuers" defaultValue={user?.fullName || ""} required />
-                    <datalist id="issuers">
-                      <option value="PHƯỚC" />
-                      <option value="LINH" />
-                      <option value="NHI" />
-                      <option value="DIỄM" />
-                      <option value="YÊN" />
-                      <option value="DUY THƯƠNG" />
-                    </datalist>
-                  </div>
+                  {issuerMode === "select" ? (
+                    <div className="md:col-span-2 space-y-2">
+                      <Label htmlFor="issuerSelect">Người cấp</Label>
+                      <Select
+                        id="issuerSelect"
+                        value={selectedIssuer}
+                        onChange={(e) => {
+                          if (e.target.value === "__custom__") {
+                            setIssuerMode("custom");
+                          } else {
+                            setSelectedIssuer(e.target.value);
+                          }
+                        }}
+                      >
+                        {defaultList.map((name) => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                        <option value="__custom__">✍️ Gõ tên khác...</option>
+                      </Select>
+                      <input type="hidden" name="issuerName" value={selectedIssuer} />
+                    </div>
+                  ) : (
+                    <div className="md:col-span-2 space-y-2">
+                      <div className="flex justify-between items-center">
+                        <Label htmlFor="customIssuerInput">Người cấp</Label>
+                        <button
+                          type="button"
+                          onClick={() => setIssuerMode("select")}
+                          className="text-xs text-orange-600 hover:underline"
+                        >
+                          Chọn từ danh sách
+                        </button>
+                      </div>
+                      <Input
+                        id="customIssuerInput"
+                        name="issuerName"
+                        value={customIssuer}
+                        onChange={(e) => setCustomIssuer(e.target.value)}
+                        placeholder="Nhập tên người cấp"
+                        required
+                      />
+                    </div>
+                  )}
                   <div className="md:col-span-2">
                     <Field label="Đại lý" name="agent" required={false} />
                   </div>
