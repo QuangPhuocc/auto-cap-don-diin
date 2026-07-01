@@ -24,7 +24,27 @@ policyRouter.get("/", asyncHandler(async (req, res) => {
   const { page, limit, q, status } = pagination.parse(req.query);
   
   const userIdQuery = req.query.userId ? String(req.query.userId) : undefined;
-  const own = req.user!.role === UserRole.CTV ? { userId: req.user!.id } : (userIdQuery ? { userId: userIdQuery } : {});
+  let own = {};
+  if (req.user!.role === UserRole.CTV) {
+    own = { userId: req.user!.id };
+  } else if (req.user!.role === UserRole.MANAGER) {
+    const ctvUsers = await prisma.user.findMany({
+      where: { creatorId: req.user!.id },
+      select: { id: true }
+    });
+    const allowedUserIds = [req.user!.id, ...ctvUsers.map(u => u.id)];
+    if (userIdQuery) {
+      if (allowedUserIds.includes(userIdQuery)) {
+        own = { userId: userIdQuery };
+      } else {
+        own = { userId: { in: [] } };
+      }
+    } else {
+      own = { userId: { in: allowedUserIds } };
+    }
+  } else {
+    own = userIdQuery ? { userId: userIdQuery } : {};
+  }
   
   const month = req.query.month ? Number(req.query.month) : undefined;
   const year = req.query.year ? Number(req.query.year) : undefined;
@@ -85,7 +105,27 @@ policyRouter.post("/excel", excelUpload.single("file"), asyncHandler(async (req,
 policyRouter.get("/export", asyncHandler(async (req, res) => {
   const user = req.user!;
   const userIdQuery = req.query.userId ? String(req.query.userId) : undefined;
-  const own = user.role === UserRole.CTV ? { userId: user.id } : (userIdQuery ? { userId: userIdQuery } : {});
+  let own = {};
+  if (user.role === UserRole.CTV) {
+    own = { userId: user.id };
+  } else if (user.role === UserRole.MANAGER) {
+    const ctvUsers = await prisma.user.findMany({
+      where: { creatorId: user.id },
+      select: { id: true }
+    });
+    const allowedUserIds = [user.id, ...ctvUsers.map(u => u.id)];
+    if (userIdQuery) {
+      if (allowedUserIds.includes(userIdQuery)) {
+        own = { userId: userIdQuery };
+      } else {
+        own = { userId: { in: [] } };
+      }
+    } else {
+      own = { userId: { in: allowedUserIds } };
+    }
+  } else {
+    own = userIdQuery ? { userId: userIdQuery } : {};
+  }
   
   const month = req.query.month ? Number(req.query.month) : undefined;
   const year = req.query.year ? Number(req.query.year) : undefined;

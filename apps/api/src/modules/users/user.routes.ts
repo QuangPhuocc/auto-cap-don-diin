@@ -46,7 +46,10 @@ userRouter.get("/", asyncHandler(async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
   const q = String(req.query.q ?? "");
-  const where = q ? { OR: [{ username: { contains: q } }, { fullName: { contains: q } }] } : {};
+  let where: any = q ? { OR: [{ username: { contains: q } }, { fullName: { contains: q } }] } : {};
+  if (req.user!.role === UserRole.MANAGER) {
+    where.creatorId = req.user!.id;
+  }
   const [items, total] = await Promise.all([
     prisma.user.findMany({ where, select: { id: true, username: true, fullName: true, phone: true, role: true, status: true, createdAt: true }, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit }),
     prisma.user.count({ where })
@@ -92,12 +95,19 @@ userRouter.get("/", asyncHandler(async (req, res) => {
 
 userRouter.post("/", asyncHandler(async (req, res) => {
   const input = createSchema.parse(req.body);
-  if (req.user!.role === UserRole.MANAGER && input.role === UserRole.ADMIN) {
-    throw new AppError(403, "Quản lý không được phép tạo tài khoản Admin");
+  if (req.user!.role === UserRole.MANAGER && input.role !== UserRole.CTV) {
+    throw new AppError(403, "Quản lý chỉ được phép tạo tài khoản CTV");
   }
   if (await prisma.user.findUnique({ where: { username: input.username } })) throw new AppError(409, "Tên đăng nhập đã tồn tại", "USERNAME_EXISTS");
   const { password, ...profile } = input;
-  const user = await prisma.user.create({ data: { ...profile, passwordHash: await bcrypt.hash(password, 12) }, select: { id: true, username: true, fullName: true, phone: true, role: true, status: true, createdAt: true } });
+  const user = await prisma.user.create({
+    data: {
+      ...profile,
+      passwordHash: await bcrypt.hash(password, 12),
+      creatorId: req.user!.id
+    },
+    select: { id: true, username: true, fullName: true, phone: true, role: true, status: true, creatorId: true, createdAt: true }
+  });
   await audit(req, "CTV_CREATE", { targetUserId: user.id, username: user.username });
   res.status(201).json(user);
 }));
