@@ -48,7 +48,8 @@ export function NewPolicyPage() {
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const isSpecialUser = user
-    ? ["LINH", "PHƯỚC", "YÊN", "DIỄM", "NHI"].includes(user.fullName.toUpperCase()) ||
+    ? user.role === "ADMIN" ||
+      ["LINH", "PHƯỚC", "YÊN", "DIỄM", "NHI"].includes(user.fullName.toUpperCase()) ||
       ["0962731468", "0906643381", "0942542249", "0981740680", "0931183389"].includes(user.username)
     : false;
 

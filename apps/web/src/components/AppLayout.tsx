@@ -28,7 +28,7 @@ export function AppLayout() {
         <div className="flex h-16 items-center justify-between border-b px-3.5">
           <div className="flex items-center gap-2">
             <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 text-lg font-black text-white">D</div>
-            <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap">
+            <div className={cn("transition-opacity duration-200 whitespace-nowrap", open ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>
               <div className="font-bold">DIIN Portal</div>
               <div className="text-xs text-muted-foreground">Bảo hiểm TNDS</div>
             </div>
@@ -39,7 +39,7 @@ export function AppLayout() {
           {nav.map(({to,label,icon:Icon})=>(
             <NavLink key={to} to={to} end={to==="/"} onClick={()=>setOpen(false)} className={({isActive})=>cn("flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium whitespace-nowrap",isActive?"bg-orange-50 text-orange-700":"text-stone-600 hover:bg-stone-100")}>
               <Icon size={18} className="shrink-0" />
-              <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">{label}</span>
+              <span className={cn("transition-opacity duration-200", open ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>{label}</span>
             </NavLink>
           ))}
         </nav>
@@ -50,13 +50,13 @@ export function AppLayout() {
           <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-orange-100 text-sm font-bold text-orange-700">
             {user?.fullName?.charAt(0).toUpperCase()}
           </div>
-          <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 min-w-0">
+          <div className={cn("transition-opacity duration-200 min-w-0", open ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>
             <div className="truncate text-xs font-semibold">{user?.fullName}</div>
             <div className="truncate text-[10px] text-muted-foreground">{user?.phone || "Chưa có SĐT"}</div>
             <div className="truncate text-[9px] font-medium text-orange-600 uppercase">{roleText[user?.role ?? ""] || user?.role}</div>
           </div>
         </div>
-        <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 mt-2">
+        <div className={cn("transition-opacity duration-200 mt-2", open ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>
           <Button variant="ghost" size="sm" className="w-full justify-start text-xs p-1 h-8" onClick={logout}>
             <LogOut size={14} className="mr-1" />Đăng xuất
           </Button>
@@ -64,11 +64,11 @@ export function AppLayout() {
       </div>
     </aside>
     <div className="lg:pl-16 transition-all duration-300">
-      <header className="sticky top-0 z-30 flex h-16 items-center border-b bg-white/90 px-4 backdrop-blur lg:px-8">
-        <Button className="mr-3 lg:hidden" variant="ghost" size="icon" onClick={()=>setOpen(true)}><Menu size={20}/></Button>
-        <div>
-          <h1 className="font-semibold">Phát hành bảo hiểm Bắt buộc TNDS hãng Viễn Đông</h1>
-          <p className="text-xs text-muted-foreground">CTV tự chịu trách nhiệm cho mọi thông tin thẻ bảo hiểm được phát hành.</p>
+      <header className="sticky top-0 z-30 flex min-h-16 py-3 items-center border-b bg-white/90 px-4 backdrop-blur lg:px-8">
+        <Button className="mr-3 shrink-0 lg:hidden" variant="ghost" size="icon" onClick={()=>setOpen(true)}><Menu size={20}/></Button>
+        <div className="min-w-0">
+          <h1 className="font-semibold text-sm sm:text-base md:text-lg">Phát hành bảo hiểm Bắt buộc TNDS hãng Viễn Đông</h1>
+          <p className="text-[10px] sm:text-xs text-muted-foreground">CTV tự chịu trách nhiệm cho mọi thông tin thẻ bảo hiểm được phát hành.</p>
         </div>
       </header>
       <main className="p-4 lg:p-8"><Outlet/></main>
