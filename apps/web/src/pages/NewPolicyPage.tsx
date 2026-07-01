@@ -2,6 +2,7 @@ import { Send } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { api } from "../lib/api";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Select } from "../components/ui";
+import { useAuth } from "../context/AuthContext";
 
 const vehicleTypes = [
   "XE Ô TÔ KHÔNG KD VẬN TẢI & XE BUÝT",
@@ -42,8 +43,14 @@ const Field = ({
 );
 
 export function NewPolicyPage() {
+  const { user } = useAuth();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const isSpecialUser = user
+    ? ["LINH", "PHƯỚC", "YÊN", "DIỄM", "NHI"].includes(user.fullName.toUpperCase()) ||
+      ["0962731468", "0906643381", "0942542249", "0981740680", "0931183389"].includes(user.username)
+    : false;
 
   // Default values: cộng 10 phút, làm tròn về đuôi 5 hoặc 10
   const now = new Date();
@@ -114,13 +121,29 @@ export function NewPolicyPage() {
 
             <div className="grid gap-4 md:grid-cols-6">
               
-              {/* Dòng 1: Số điện thoại - Đại lý */}
-              <div className="md:col-span-3">
-                <Field label="Số điện thoại nhận GCN" name="phone" />
-              </div>
-              <div className="md:col-span-3">
-                <Field label="Đại lý" name="agent" required={false} />
-              </div>
+              {/* Dòng 1: Cấu hình động theo tài khoản */}
+              {isSpecialUser ? (
+                <>
+                  <div className="md:col-span-2">
+                    <Field label="Người cấp" name="issuerName" defaultValue={user?.fullName || ""} />
+                  </div>
+                  <div className="md:col-span-2">
+                    <Field label="Đại lý" name="agent" required={false} />
+                  </div>
+                  <div className="md:col-span-2">
+                    <Field label="Số điện thoại nhận GCN" name="phone" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="md:col-span-3">
+                    <Field label="Đại lý" name="agent" required={false} />
+                  </div>
+                  <div className="md:col-span-3">
+                    <Field label="Số điện thoại nhận GCN" name="phone" />
+                  </div>
+                </>
+              )}
 
               {/* Dòng 2: Tên chủ xe - Biển số */}
               <div className="md:col-span-3">

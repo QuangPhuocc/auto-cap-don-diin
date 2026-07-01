@@ -91,6 +91,7 @@ model Policy {
   passengerFee      Int?         @default(0) @map("passenger_fee")
   email             String?
   agent             String?
+  issuerName        String?      @map("issuer_name")
   insuranceYears    Int?         @default(1) @map("insurance_years")
   status             PolicyStatus @default(QUEUED)
   error              String?

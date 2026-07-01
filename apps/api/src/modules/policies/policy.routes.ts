@@ -178,7 +178,7 @@ policyRouter.get("/export", asyncHandler(async (req, res) => {
       "LP NNTX": passengerTotalFee,
       "TỔNG PHÍ": p.premium ? totalPremium : "",
       "TRẠNG THÁI": p.status === "ISSUED" ? "Đã phát hành" : p.status === "FAILED" ? "Thất bại" : p.status === "PROCESSING" ? "Đang xử lý" : "Chờ phát hành",
-      "NGƯỜI CẤP (Tên tài khoản)": p.user?.fullName || "",
+      "NGƯỜI CẤP": p.issuerName || p.user?.fullName || "",
       "ĐẠI LÝ": p.agent || "",
       "SDT": p.phone || ""
     };
