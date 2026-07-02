@@ -9,7 +9,7 @@ import { AppError, assertFound } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
 import { excelUpload } from "../../middleware/upload.js";
 import { enqueuePolicyJob } from "../../queue/policy.queue.js";
-import { inspectExcel } from "./excel.service.js";
+import { inspectExcel, cleanExcelFile } from "./excel.service.js";
 import { singlePolicySchema } from "./policy.schemas.js";
 
 export const policyRouter = Router();
@@ -90,6 +90,7 @@ policyRouter.post("/single", asyncHandler(async (req, res) => {
 
 policyRouter.post("/excel", excelUpload.single("file"), asyncHandler(async (req, res) => {
   if (!req.file) throw new AppError(400, "Vui lòng chọn file Excel");
+  cleanExcelFile(req.file.path);
   let info;
   try { info = inspectExcel(req.file.path); } catch (error) { throw error; }
   const result = await prisma.$transaction(async (tx) => {

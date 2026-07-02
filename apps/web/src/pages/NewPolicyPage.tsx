@@ -1,8 +1,9 @@
 import { Send } from "lucide-react";
-import { FormEvent, useState, useEffect } from "react";
+import { FormEvent, useState, useEffect, InputHTMLAttributes } from "react";
 import { api } from "../lib/api";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Select } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
+import { removeVietnameseTones, restoreTelexAndUppercase } from "../lib/utils";
 
 const vehicleTypes = [
   "XE Ô TÔ KHÔNG KD VẬN TẢI & XE BUÝT",
@@ -28,17 +29,18 @@ const Field = ({
   name,
   type = "text",
   required = true,
-  defaultValue
+  defaultValue,
+  ...props
 }: {
   label: string;
   name: string;
   type?: string;
   required?: boolean;
   defaultValue?: string | number;
-}) => (
+} & InputHTMLAttributes<HTMLInputElement>) => (
   <div className="space-y-2">
     <Label htmlFor={name}>{label}</Label>
-    <Input id={name} name={name} type={type} required={required} defaultValue={defaultValue} />
+    <Input id={name} name={name} type={type} required={required} defaultValue={defaultValue} {...props} />
   </div>
 );
 
@@ -46,6 +48,21 @@ export function NewPolicyPage() {
   const { user } = useAuth();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const handleInput = (e: FormEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const originalValue = input.value;
+    const cleanedValue = restoreTelexAndUppercase(originalValue);
+    if (originalValue !== cleanedValue) {
+      const selectionStart = input.selectionStart;
+      const selectionEnd = input.selectionEnd;
+      input.value = cleanedValue;
+      if (selectionStart !== null && selectionEnd !== null) {
+        const diff = cleanedValue.length - originalValue.length;
+        input.setSelectionRange(selectionStart + diff, selectionEnd + diff);
+      }
+    }
+  };
 
   const isSpecialUser = user
     ? user.role === "ADMIN" ||
@@ -93,6 +110,16 @@ export function NewPolicyPage() {
     setMessage(null);
     const f = new FormData(form);
     const body = Object.fromEntries(f.entries());
+
+    if (typeof body.chassisNumber === "string") {
+      body.chassisNumber = restoreTelexAndUppercase(body.chassisNumber).trim().toUpperCase();
+    }
+    if (typeof body.engineNumber === "string") {
+      body.engineNumber = restoreTelexAndUppercase(body.engineNumber).trim().toUpperCase();
+    }
+    if (typeof body.plateNumber === "string") {
+      body.plateNumber = restoreTelexAndUppercase(body.plateNumber).trim().toUpperCase();
+    }
 
     if (!body.seatCount) delete body.seatCount;
 
@@ -211,7 +238,11 @@ export function NewPolicyPage() {
                 <Field label="Họ tên chủ xe" name="customerName" />
               </div>
               <div className="md:col-span-3">
-                <Field label="Biển số" name="plateNumber" />
+                <Field
+                  label="Biển số"
+                  name="plateNumber"
+                  onInput={handleInput}
+                />
               </div>
 
               {/* Dòng 3: Địa chỉ */}
@@ -221,10 +252,18 @@ export function NewPolicyPage() {
 
               {/* Dòng 4: Số khung - Số máy */}
               <div className="md:col-span-3">
-                <Field label="Số khung" name="chassisNumber" />
+                <Field
+                  label="Số khung"
+                  name="chassisNumber"
+                  onInput={handleInput}
+                />
               </div>
               <div className="md:col-span-3">
-                <Field label="Số máy" name="engineNumber" />
+                <Field
+                  label="Số máy"
+                  name="engineNumber"
+                  onInput={handleInput}
+                />
               </div>
 
               {/* Dòng 5: Loại xe - Số chỗ ngồi - Ngày bắt đầu */}
