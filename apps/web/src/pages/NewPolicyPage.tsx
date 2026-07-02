@@ -6,20 +6,34 @@ import { useAuth } from "../context/AuthContext";
 import { removeVietnameseTones, restoreTelexAndUppercase } from "../lib/utils";
 
 const vehicleTypes = [
+  "XE BUÝT",
   "XE Ô TÔ KHÔNG KD VẬN TẢI & XE BUÝT",
   "XE Ô TÔ KD VẬN TẢI",
-  "Vừa chở hàng và người (Mini van, Pickup) Không KD",
-  "Vừa chở hàng và người (Mini van, Pickup) Kinh doanh",
-  "XE ĐẦU KÉO các loại (Không KD)",
-  "XE ĐẦU KÉO các loại (Kinh doanh)",
-  "XE Ô TÔ CHỞ HÀNG, XE TẢI Dưới 3 tấn (Không kinh doanh)",
   "XE Ô TÔ CHỞ HÀNG, XE TẢI Dưới 3 tấn (Kinh doanh)",
-  "XE Ô TÔ CHỞ HÀNG, XE TẢI Từ 3 đến 8 tấn (Không kinh doanh)",
   "XE Ô TÔ CHỞ HÀNG, XE TẢI Từ 3 đến 8 tấn (Kinh doanh)",
+  "XE Ô TÔ CHỞ HÀNG, XE TẢI Trên 8 đến 15 tấn (Kinh doanh)",
+  "XE Ô TÔ CHỞ HÀNG, XE TẢI Trên 15 tấn (Kinh doanh)",
+  "XE Ô TÔ CHỞ HÀNG, XE TẢI Dưới 3 tấn (Không kinh doanh)",
+  "XE Ô TÔ CHỞ HÀNG, XE TẢI Từ 3 đến 8 tấn (Không kinh doanh)",
   "XE Ô TÔ CHỞ HÀNG, XE TẢI Trên 8 đến 15 tấn (Không kinh doanh)",
   "XE Ô TÔ CHỞ HÀNG, XE TẢI Trên 15 tấn (Không kinh doanh)",
+  "Vừa chở hàng và người (Mini van, Pickup) Không KD",
+  "Vừa chở hàng và người (Mini van, Pickup) Kinh doanh",
+  "XE TAXI",
+  "XE ĐẦU KÉO các loại (Kinh doanh)",
+  "XE ĐẦU KÉO các loại (Không KD)",
+  "XE ĐẦU KÉO tập lái các loại",
   "XE Ô TÔ CHUYÊN DÙNG Dưới 3 tấn",
-  "XE Ô TÔ CHUYÊN DÙNG Xe cứu thương"
+  "XE Ô TÔ CHUYÊN DÙNG Từ 3 đến 8 tấn",
+  "XE Ô TÔ CHUYÊN DÙNG Trên 8 đến 15 tấn",
+  "XE Ô TÔ CHUYÊN DÙNG Trên 15 tấn",
+  "XE Ô TÔ CHUYÊN DÙNG Xe cứu thương",
+  "XE Ô TÔ CHUYÊN DÙNG Xe chở tiền",
+  "XE TẬP LÁI (CHỞ NGƯỜI)",
+  "XE TẬP LÁI CHỞ HÀNG (XE TẢI) Dưới 3 tấn",
+  "XE TẬP LÁI CHỞ HÀNG (XE TẢI) Từ 3 đến 8 tấn",
+  "XE TẬP LÁI CHỞ HÀNG (XE TẢI) Trên 8 đến 15 tấn",
+  "XE TẬP LÁI CHỞ HÀNG (XE TẢI) Trên 15 tấn"
 ];
 
 const passengerFees = [0, 10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000];

@@ -1,4 +1,4 @@
-import { BarChart3, FilePlus2, Files, LogOut, Menu, Sheet, Users, X, User } from "lucide-react";
+import { BarChart3, FilePlus2, Files, LogOut, Menu, Sheet, Users, X, User, Search } from "lucide-react";
 import { useState, useEffect } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -9,6 +9,7 @@ const links = [
   { to: "/", label: "Tổng quan", icon: BarChart3 },
   { to: "/policies/new", label: "Tạo đơn", icon: FilePlus2 },
   { to: "/policies", label: "Danh sách đơn", icon: Files },
+  { to: "/policies/lookup", label: "Tra cứu biển số", icon: Search },
   { to: "/profile", label: "Tài khoản", icon: User }
 ];
 

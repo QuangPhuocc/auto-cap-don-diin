@@ -205,6 +205,36 @@ policyRouter.get("/export", asyncHandler(async (req, res) => {
   res.send(buffer);
 }));
 
+policyRouter.get("/lookup", asyncHandler(async (req, res) => {
+  const plate = String(req.query.plate ?? "").trim();
+  if (!plate || plate.length < 2) {
+    return res.json({ items: [] });
+  }
+
+  let own: Record<string, unknown> = {};
+  if (req.user!.role === UserRole.CTV) {
+    own = { userId: req.user!.id };
+  } else if (req.user!.role === UserRole.MANAGER) {
+    const ctvUsers = await prisma.user.findMany({
+      where: { creatorId: req.user!.id },
+      select: { id: true }
+    });
+    const allowedIds = [req.user!.id, ...ctvUsers.map(u => u.id)];
+    own = { userId: { in: allowedIds } };
+  }
+
+  const items = await prisma.policy.findMany({
+    where: {
+      ...own,
+      plateNumber: { contains: plate }
+    },
+    include: { user: { select: { username: true, fullName: true } } },
+    orderBy: { createdAt: "desc" },
+    take: 10
+  });
+  res.json({ items });
+}));
+
 policyRouter.get("/:id", asyncHandler(async (req, res) => {
   const id = String(req.params.id);
   const policy = assertFound(await prisma.policy.findUnique({ where: { id }, include: { user: { select: { username: true, fullName: true } }, job: true } }));

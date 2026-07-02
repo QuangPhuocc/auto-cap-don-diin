@@ -165,7 +165,7 @@ export class DiinService {
     // Bấm Lưu (Cổng DIIN tự động phát hành thẻ bảo hiểm)
     await page.locator("#btn-submit").click();
     await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(2000); // Chờ 2s để server ghi nhận, sau đó robot sẽ bắt đầu quét ngay
+    await page.waitForTimeout(5000); // Chờ 5s luôn theo ý kiến cải tiến của người dùng
     
     return this.collectByPlate(policy.plateNumber, policy.customerName, submissionTime);
   }
@@ -236,8 +236,8 @@ export class DiinService {
 
     const targetKey = plateNumber.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-    // Chờ tối đa 60 giây để DIIN sinh số Ấn chỉ (số Seri)
-    for (let attempt = 0; attempt < 10; attempt++) {
+    // Chờ tối đa 20 giây (3 lần thử, mỗi lần cách nhau 5 giây) để DIIN sinh số Ấn chỉ (số Seri)
+    for (let attempt = 0; attempt < 3; attempt++) {
       await page.goto(`${env.DIIN_BASE_URL}${diinSelectors.links.issuedCars}`, { waitUntil: "networkidle" });
       const search = page.locator("#search");
       if (await search.count()) {
@@ -330,22 +330,31 @@ export class DiinService {
     if (!pdfUrl) return {};
 
     const safeName = fileStem.replace(/[^a-zA-Z0-9._-]/g, "_");
-    await fs.mkdir(env.PDF_DIR, { recursive: true });
     const pdfPath = path.resolve(env.PDF_DIR, `${safeName}.pdf`);
 
-    // Tải PDF với cơ chế thử lại nếu VNG Cloud chưa sinh xong file (404)
-    let response = await this.activePage.context().request.get(pdfUrl);
-    for (let attempt = 0; attempt < 6 && !response.ok(); attempt++) {
-      console.log(`Chờ file PDF sẵn sàng trên VNG Cloud, lần thử ${attempt + 1}...`);
-      await this.activePage.waitForTimeout(5000);
-      response = await this.activePage.context().request.get(pdfUrl);
-    }
+    // Trả pdfUrl ngay lập tức — không block chờ download.
+    // Download PDF về server chạy ngầm (fire-and-forget) để lưu bản backup.
+    const pageContext = this.activePage.context();
+    (async () => {
+      try {
+        await fs.mkdir(env.PDF_DIR, { recursive: true });
+        let response = await pageContext.request.get(pdfUrl!);
+        for (let attempt = 0; attempt < 8 && !response.ok(); attempt++) {
+          console.log(`[bg] Chờ file PDF sẵn sàng trên VNG Cloud, lần thử ${attempt + 1}...`);
+          await new Promise(r => setTimeout(r, 4000));
+          response = await pageContext.request.get(pdfUrl!);
+        }
+        if (response.ok()) {
+          await fs.writeFile(pdfPath, await response.body());
+          console.log(`[bg] PDF đã lưu: ${pdfPath}`);
+        }
+      } catch (err) {
+        console.error("[bg] Lỗi download PDF:", err);
+      }
+    })();
 
-    if (response.ok()) {
-      await fs.writeFile(pdfPath, await response.body());
-    }
-
-    return { pdfUrl, pdfPath: response.ok() ? pdfPath : undefined };
+    // Trả về pdfUrl ngay, pdfPath sẽ được cập nhật bởi background job
+    return { pdfUrl };
   }
 
   private formatDate(date: Date) {
