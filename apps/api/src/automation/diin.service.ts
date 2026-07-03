@@ -166,7 +166,7 @@ export class DiinService {
     // Bấm Lưu (Cổng DIIN tự động phát hành thẻ bảo hiểm)
     await page.locator("#btn-submit").click();
     await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(5000); // Chờ 5s luôn theo ý kiến cải tiến của người dùng
+    await page.waitForTimeout(6000); // Chờ 6s luôn theo ý kiến cải tiến của người dùng
     
     return this.collectByPlate(policy.plateNumber, policy.customerName, submissionTime, policyId);
   }
@@ -344,18 +344,18 @@ export class DiinService {
 
     // Trả pdfUrl ngay lập tức — không block chờ download.
     // Download PDF về server chạy ngầm (fire-and-forget) để lưu bản backup.
-    const pageContext = this.activePage.context();
     (async () => {
       try {
         await fs.mkdir(env.PDF_DIR, { recursive: true });
-        let response = await pageContext.request.get(pdfUrl!);
-        for (let attempt = 0; attempt < 8 && !response.ok(); attempt++) {
+        let response = await fetch(pdfUrl!);
+        for (let attempt = 0; attempt < 8 && !response.ok; attempt++) {
           console.log(`[bg] Chờ file PDF sẵn sàng trên VNG Cloud, lần thử ${attempt + 1}...`);
           await new Promise(r => setTimeout(r, 4000));
-          response = await pageContext.request.get(pdfUrl!);
+          response = await fetch(pdfUrl!);
         }
-        if (response.ok()) {
-          await fs.writeFile(pdfPath, await response.body());
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+          await fs.writeFile(pdfPath, Buffer.from(arrayBuffer));
           console.log(`[bg] PDF đã lưu: ${pdfPath}`);
           
           if (policyId) {

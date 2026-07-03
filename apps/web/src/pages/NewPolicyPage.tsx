@@ -301,6 +301,9 @@ export function NewPolicyPage() {
                   label="Biển số"
                   name="plateNumber"
                   onInput={handleInput}
+                  onBlur={(e) => {
+                    e.target.value = formatPlateNumber(e.target.value);
+                  }}
                 />
               </div>
 

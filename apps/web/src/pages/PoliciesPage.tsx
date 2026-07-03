@@ -22,7 +22,7 @@ const statusText: Record<string, string> = {
 
 /** Đồng hồ đếm ngược — hiển thị số giây còn lại tối đa để hoàn thành */
 function CountdownTimer({ createdAt }: { createdAt: string }) {
-  const MAX_WAIT_SECS = 20; // Thời gian chờ tối đa 20s
+  const MAX_WAIT_SECS = 12; // Thời gian chờ tối đa 12s
   const [remaining, setRemaining] = useState(MAX_WAIT_SECS);
 
   useEffect(() => {
@@ -120,7 +120,7 @@ export function PoliciesPage() {
       api<{ items: Policy[] }>(url)
         .then(r => setItems(r.items))
         .catch(e => console.error("Polling error:", e));
-    }, 4000);
+    }, 2000);
     return () => clearInterval(timer);
   }, [items, q, status, selectedMonth, selectedYear]);
 
