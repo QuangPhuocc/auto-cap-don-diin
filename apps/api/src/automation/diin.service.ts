@@ -4,6 +4,7 @@ import { chromium, type Browser, type Locator, type Page } from "playwright";
 import * as XLSX from "xlsx";
 import { env } from "../config/env.js";
 import { AppError } from "../lib/errors.js";
+import { prisma } from "../lib/prisma.js";
 import { diinSelectors } from "./diin.selectors.js";
 import type { IssuedPolicyResult, SinglePolicyRecord } from "./diin.types.js";
 
@@ -128,7 +129,7 @@ export class DiinService {
     throw new AppError(502, `Không tìm thấy nút ${name}`, "DIIN_BUTTON_NOT_FOUND");
   }
 
-  async issueSingle(policy: SinglePolicyRecord): Promise<IssuedPolicyResult> {
+  async issueSingle(policy: SinglePolicyRecord, policyId?: string): Promise<IssuedPolicyResult> {
     this.assertIssueAllowed();
     const page = this.activePage;
     await page.goto(`${env.DIIN_BASE_URL}${diinSelectors.links.issuedCarsCreate}`, { waitUntil: "networkidle" });
@@ -167,7 +168,7 @@ export class DiinService {
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(5000); // Chờ 5s luôn theo ý kiến cải tiến của người dùng
     
-    return this.collectByPlate(policy.plateNumber, policy.customerName, submissionTime);
+    return this.collectByPlate(policy.plateNumber, policy.customerName, submissionTime, policyId);
   }
 
   async issueExcel(filePath: string): Promise<IssuedPolicyResult[]> {
@@ -227,7 +228,12 @@ export class DiinService {
     return results;
   }
 
-  private async collectByPlate(plateNumber: string, fallbackName: string, submissionTime: Date): Promise<IssuedPolicyResult> {
+  private async collectByPlate(
+    plateNumber: string,
+    fallbackName: string,
+    submissionTime: Date,
+    policyId?: string
+  ): Promise<IssuedPolicyResult> {
     const page = this.activePage;
     let certificateNumber: string | undefined;
     let premium: number | undefined;
@@ -236,8 +242,9 @@ export class DiinService {
 
     const targetKey = plateNumber.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-    // Chờ tối đa 20 giây (3 lần thử, mỗi lần cách nhau 5 giây) để DIIN sinh số Ấn chỉ (số Seri)
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Thử 2 lần (Lần 1: sau 5s submit, Lần 2: sau khi đợi thêm 2s)
+    const maxAttempts = 2;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await page.goto(`${env.DIIN_BASE_URL}${diinSelectors.links.issuedCars}`, { waitUntil: "networkidle" });
       const search = page.locator("#search");
       if (await search.count()) {
@@ -247,7 +254,7 @@ export class DiinService {
       }
       
       // Đợi lưới dữ liệu tải xong ít nhất 1 dòng
-      await page.locator("tr.jqgrow").first().waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+      await page.locator("tr.jqgrow").first().waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
 
       const rows = page.locator("tr.jqgrow");
       const count = await rows.count();
@@ -292,8 +299,11 @@ export class DiinService {
           matchedRow = undefined;
         }
       }
-      console.log(`Chờ sinh số Ấn chỉ cho ${plateNumber}, thử lại lần thứ ${attempt + 1}...`);
-      await page.waitForTimeout(5000);
+
+      if (attempt < maxAttempts - 1) {
+        console.log(`Chờ sinh số Ấn chỉ cho ${plateNumber}, thử lại lần thứ ${attempt + 2} sau 2 giây...`);
+        await page.waitForTimeout(2000); // Đợi 2s trước khi thử lần tiếp theo
+      }
     }
 
     if (!matchedRow) {
@@ -306,10 +316,10 @@ export class DiinService {
       certificateNumber,
       premium
     };
-    return { ...result, ...(await this.captureCertificate(matchedRow, certificateNumber ?? plateNumber)) };
+    return { ...result, ...(await this.captureCertificate(matchedRow, certificateNumber ?? plateNumber, policyId)) };
   }
 
-  private async captureCertificate(row: Locator, fileStem: string) {
+  private async captureCertificate(row: Locator, fileStem: string, policyId?: string) {
     const gcn = row.getByText(diinSelectors.buttons.certificate).first();
     let pdfUrl: string | undefined;
     if (await gcn.count()) {
@@ -347,6 +357,14 @@ export class DiinService {
         if (response.ok()) {
           await fs.writeFile(pdfPath, await response.body());
           console.log(`[bg] PDF đã lưu: ${pdfPath}`);
+          
+          if (policyId) {
+            await prisma.policy.update({
+              where: { id: policyId },
+              data: { pdfPath }
+            });
+            console.log(`[bg] Đã cập nhật pdfPath trong database cho policy: ${policyId}`);
+          }
         }
       } catch (err) {
         console.error("[bg] Lỗi download PDF:", err);

@@ -14,7 +14,7 @@ export const env = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().default("redis://localhost:6379"),
   JWT_SECRET: z.string().min(32),
-  JWT_EXPIRES_IN: z.string().default("8h"),
+  JWT_EXPIRES_IN: z.string().default("30d"),
   DIIN_BASE_URL: z.string().url().default("https://daily.diin.com.vn"),
   DIIN_USERNAME: z.string().default(""),
   DIIN_PASSWORD: z.string().default(""),

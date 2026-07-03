@@ -100,7 +100,7 @@ export async function processPolicyJob(data: PolicyQueueData) {
         where: { id: data.policyId },
         data: { status: PolicyStatus.PROCESSING }
       });
-      const result = await diin.issueSingle(policy);
+      const result = await diin.issueSingle(policy, policy.id);
       await prisma.policy.update({
         where: { id: policy.id },
         data: { ...result, status: PolicyStatus.ISSUED, issuedAt: new Date(), error: null }

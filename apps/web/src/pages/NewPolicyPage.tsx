@@ -1,9 +1,10 @@
 import { Send } from "lucide-react";
 import { FormEvent, useState, useEffect, InputHTMLAttributes } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Select } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
-import { removeVietnameseTones, restoreTelexAndUppercase } from "../lib/utils";
+import { removeVietnameseTones, restoreTelexAndUppercase, formatPlateNumber } from "../lib/utils";
 
 const vehicleTypes = [
   "XE BUÝT",
@@ -62,6 +63,19 @@ export function NewPolicyPage() {
   const { user } = useAuth();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [hasNewPolicy, setHasNewPolicy] = useState(
+    localStorage.getItem("hasNewPolicy") === "true"
+  );
+
+  useEffect(() => {
+    const handleNewPolicy = () => {
+      setHasNewPolicy(true);
+    };
+    window.addEventListener("newPolicyIssued", handleNewPolicy);
+    return () => {
+      window.removeEventListener("newPolicyIssued", handleNewPolicy);
+    };
+  }, []);
 
   const handleInput = (e: FormEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
@@ -125,14 +139,32 @@ export function NewPolicyPage() {
     const f = new FormData(form);
     const body = Object.fromEntries(f.entries());
 
+    // Validate NNTX <= seatCount
+    const seat = Number(body.seatCount || 0);
+    const passenger = Number(body.passengerCount || 0);
+    if (passenger > seat) {
+      setMessage({
+        ok: false,
+        text: "Số chỗ mua NNTX lớn hơn Số chỗ ngồi trên xe"
+      });
+      setBusy(false);
+      return;
+    }
+
     if (typeof body.chassisNumber === "string") {
-      body.chassisNumber = restoreTelexAndUppercase(body.chassisNumber).trim().toUpperCase();
+      const cleaned = restoreTelexAndUppercase(body.chassisNumber).trim().toUpperCase();
+      body.chassisNumber = cleaned || "0";
+    } else {
+      body.chassisNumber = "0";
     }
     if (typeof body.engineNumber === "string") {
-      body.engineNumber = restoreTelexAndUppercase(body.engineNumber).trim().toUpperCase();
+      const cleaned = restoreTelexAndUppercase(body.engineNumber).trim().toUpperCase();
+      body.engineNumber = cleaned || "0";
+    } else {
+      body.engineNumber = "0";
     }
     if (typeof body.plateNumber === "string") {
-      body.plateNumber = restoreTelexAndUppercase(body.plateNumber).trim().toUpperCase();
+      body.plateNumber = formatPlateNumber(restoreTelexAndUppercase(body.plateNumber));
     }
 
     if (!body.seatCount) delete body.seatCount;
@@ -171,10 +203,23 @@ export function NewPolicyPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4 border-b">
             <CardTitle className="text-xl font-bold text-stone-800">Tạo đơn Bảo hiểm BB TNDS</CardTitle>
-            <Button type="submit" disabled={busy} className="px-6 py-2 flex items-center gap-2">
-              <Send size={15} />
-              {busy ? "Đang gửi..." : "Phát hành"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Link to="/policies" className="relative">
+                <Button type="button" variant="outline" className="px-4 py-2 relative flex items-center gap-1.5">
+                  Danh sách đơn
+                  {hasNewPolicy && (
+                    <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                    </span>
+                  )}
+                </Button>
+              </Link>
+              <Button type="submit" disabled={busy} className="px-6 py-2 flex items-center gap-2">
+                <Send size={15} />
+                {busy ? "Đang gửi..." : "Phát hành"}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="pt-6 space-y-6">
             {/* Ẩn Giới tính (mặc định NAM) và Email (mặc định qphuocins@gmail.com) */}
@@ -269,6 +314,7 @@ export function NewPolicyPage() {
                 <Field
                   label="Số khung"
                   name="chassisNumber"
+                  required={false}
                   onInput={handleInput}
                 />
               </div>
@@ -276,6 +322,7 @@ export function NewPolicyPage() {
                 <Field
                   label="Số máy"
                   name="engineNumber"
+                  required={false}
                   onInput={handleInput}
                 />
               </div>

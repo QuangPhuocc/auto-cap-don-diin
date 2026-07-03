@@ -52,3 +52,27 @@ export function removeVietnameseTones(str: string): string {
     .replace(/đ/g, "d")
     .replace(/Đ/g, "D");
 }
+
+export function formatPlateNumber(plate: string): string {
+  const originalCleaned = plate.trim().toUpperCase();
+  if (originalCleaned.includes("+")) {
+    return originalCleaned;
+  }
+  
+  const noSpaces = originalCleaned.replace(/[\s-.]/g, "");
+  const match = noSpaces.match(/^([0-9]{2}[A-Z]{1,2}|[A-Z]{2})([0-9]+)$/);
+  if (!match) {
+    return originalCleaned;
+  }
+  
+  const prefix = match[1];
+  const numPart = match[2];
+  
+  let formattedNum = numPart;
+  if (numPart.length === 5) {
+    formattedNum = numPart.slice(0, 3) + "." + numPart.slice(3);
+  }
+  
+  return `${prefix}-${formattedNum}`;
+}
+
