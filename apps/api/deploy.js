@@ -17,7 +17,7 @@ DIIN_ALLOW_ISSUE=true
 DIIN_TIMEOUT_MS=45000
 DIIN_QUEUE_MODE=bullmq
 UPLOAD_DIR=./uploads
-PDF_DIR=./downloads
+PDF_DIR=/var/database/downloads
 MAX_UPLOAD_MB=20
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=ChangeMe123!
@@ -30,7 +30,7 @@ const commands = [
   "systemctl start redis-server && systemctl enable redis-server",
 
   // 2. Create external database folder to prevent code updates from deleting data
-  "mkdir -p /var/database",
+  "mkdir -p /var/database/downloads",
 
   // 3. Stop existing PM2 apps
   "pm2 delete all || true",
