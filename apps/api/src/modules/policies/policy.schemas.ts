@@ -54,13 +54,6 @@ export const singlePolicySchema = z.object({
 }, {
   message: "Vui lòng cung cấp Biển số xe hoặc cặp Số khung + Số máy",
   path: ["plateNumber"]
-}).refine((data) => {
-  const agent = data.agent?.trim() || "";
-  const phone = data.phone?.trim() || "";
-  return agent !== "" || phone !== "";
-}, {
-  message: "Vui lòng nhập Số điện thoại nhận GCN hoặc Đại lý",
-  path: ["phone"]
 });
 
 export type SinglePolicyInput = z.infer<typeof singlePolicySchema>;

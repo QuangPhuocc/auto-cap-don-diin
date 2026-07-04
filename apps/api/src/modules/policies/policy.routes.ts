@@ -77,6 +77,22 @@ policyRouter.get("/", asyncHandler(async (req, res) => {
 
 policyRouter.post("/single", asyncHandler(async (req, res) => {
   const input = singlePolicySchema.parse(req.body);
+
+  const specialUsernames = ["0962731468", "0906643381", "0942542249", "0981740680", "0931183389"];
+  const specialFullNames = ["LINH", "PHƯỚC", "YÊN", "DIỄM", "NHI"];
+  const isSpecial = req.user && (
+    specialUsernames.includes(req.user.username) || 
+    (req.user.fullName && specialFullNames.includes(req.user.fullName.toUpperCase()))
+  );
+
+  if (isSpecial) {
+    const agent = (input.agent || "").trim();
+    const phone = (input.phone || "").trim();
+    if (!agent && !phone) {
+      throw new AppError(422, "Vui lòng nhập Số điện thoại nhận GCN hoặc Đại lý");
+    }
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     const job = await tx.job.create({ data: { userId: req.user!.id, type: JobType.SINGLE_POLICY, payload: input } });
     const policy = await tx.policy.create({ data: { ...input, userId: req.user!.id, jobId: job.id } });

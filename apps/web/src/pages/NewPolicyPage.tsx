@@ -139,16 +139,25 @@ export function NewPolicyPage() {
     const f = new FormData(form);
     const body = Object.fromEntries(f.entries());
 
-    // Validate agent & phone: if agent is empty, phone is required
-    const agent = String(body.agent || "").trim();
-    const phone = String(body.phone || "").trim();
-    if (!agent && !phone) {
-      setMessage({
-        ok: false,
-        text: "Vui lòng nhập Số điện thoại nhận GCN hoặc Đại lý"
-      });
-      setBusy(false);
-      return;
+    // Validate agent & phone: if user is special, and agent is empty, phone is required
+    const specialUsernames = ["0962731468", "0906643381", "0942542249", "0981740680", "0931183389"];
+    const specialFullNames = ["LINH", "PHƯỚC", "YÊN", "DIỄM", "NHI"];
+    const isSpecialAccount = user && (
+      specialUsernames.includes(user.username) || 
+      specialFullNames.includes(user.fullName.toUpperCase())
+    );
+
+    if (isSpecialAccount) {
+      const agent = String(body.agent || "").trim();
+      const phone = String(body.phone || "").trim();
+      if (!agent && !phone) {
+        setMessage({
+          ok: false,
+          text: "Vui lòng nhập Số điện thoại nhận GCN hoặc Đại lý"
+        });
+        setBusy(false);
+        return;
+      }
     }
 
     // Validate NNTX <= seatCount
