@@ -15,7 +15,7 @@ import { singlePolicySchema } from "./policy.schemas.js";
 export const policyRouter = Router();
 const pagination = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
+  limit: z.coerce.number().int().min(1).max(100000).default(10000),
   q: z.preprocess((val) => (val === "" ? undefined : val), z.string().optional()),
   status: z.preprocess((val) => (val === "" ? undefined : val), z.enum(["QUEUED", "PROCESSING", "ISSUED", "FAILED"]).optional())
 });

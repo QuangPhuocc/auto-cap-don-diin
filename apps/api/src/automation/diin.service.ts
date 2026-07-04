@@ -138,7 +138,9 @@ export class DiinService {
     if (policy.address) await page.locator("#Address").fill(policy.address);
     if (policy.vehicleType) await page.locator("#AutomobilesFullTypeName").selectOption({ label: policy.vehicleType });
     if (policy.seatCount) await page.locator("#Attributes_Seat").fill(String(policy.seatCount));
-    await page.locator("#LicensePlates").fill(policy.plateNumber);
+    if (policy.plateNumber && policy.plateNumber !== "0") {
+      await page.locator("#LicensePlates").fill(policy.plateNumber);
+    }
     if (policy.gender) {
       const genderVal = policy.gender === "NỮ" ? "0" : "1";
       await page.locator("#Gender").selectOption(genderVal);
@@ -148,8 +150,8 @@ export class DiinService {
       await page.locator("#PassengerFee").selectOption(String(policy.passengerFee));
     }
     if (policy.email) await page.locator("#Email").fill(policy.email);
-    if (policy.chassisNumber) await page.locator("#ChassisNumber").fill(policy.chassisNumber);
-    if (policy.engineNumber) await page.locator("#MachineNumber").fill(policy.engineNumber);
+    if (policy.chassisNumber && policy.chassisNumber !== "0") await page.locator("#ChassisNumber").fill(policy.chassisNumber);
+    if (policy.engineNumber && policy.engineNumber !== "0") await page.locator("#MachineNumber").fill(policy.engineNumber);
     let effDate = policy.effectiveDate ? new Date(policy.effectiveDate) : new Date();
     const now = new Date();
     if (effDate.getTime() < now.getTime()) {
@@ -246,9 +248,10 @@ export class DiinService {
     const maxAttempts = 2;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await page.goto(`${env.DIIN_BASE_URL}${diinSelectors.links.issuedCars}`, { waitUntil: "networkidle" });
-      const search = page.locator("#search");
+       const search = page.locator("#search");
       if (await search.count()) {
-        await search.fill(plateNumber);
+        const queryTerm = plateNumber === "0" ? fallbackName : plateNumber;
+        await search.fill(queryTerm);
         await search.press("Enter");
         await page.waitForTimeout(1500);
       }
@@ -261,7 +264,7 @@ export class DiinService {
       for (let i = 0; i < count; i++) {
         const r = rows.nth(i);
         const rowCells = (await r.locator("td").allInnerTexts()).map(x => x.trim());
-        const hasPlate = rowCells.some(cell => {
+        const hasPlate = plateNumber === "0" ? true : rowCells.some(cell => {
           const cellKey = cell.toUpperCase().replace(/[^A-Z0-9]/g, "");
           return cellKey === targetKey;
         });

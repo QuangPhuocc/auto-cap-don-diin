@@ -139,6 +139,18 @@ export function NewPolicyPage() {
     const f = new FormData(form);
     const body = Object.fromEntries(f.entries());
 
+    // Validate agent & phone: if agent is empty, phone is required
+    const agent = String(body.agent || "").trim();
+    const phone = String(body.phone || "").trim();
+    if (!agent && !phone) {
+      setMessage({
+        ok: false,
+        text: "Vui lòng nhập Số điện thoại nhận GCN hoặc Đại lý"
+      });
+      setBusy(false);
+      return;
+    }
+
     // Validate NNTX <= seatCount
     const seat = Number(body.seatCount || 0);
     const passenger = Number(body.passengerCount || 0);
@@ -151,21 +163,41 @@ export function NewPolicyPage() {
       return;
     }
 
-    if (typeof body.chassisNumber === "string") {
-      const cleaned = restoreTelexAndUppercase(body.chassisNumber).trim().toUpperCase();
-      body.chassisNumber = cleaned || "0";
-    } else {
-      body.chassisNumber = "0";
+    // Validate plate and chassis/engine constraints
+    const plate = String(body.plateNumber || "").trim();
+    const chassis = String(body.chassisNumber || "").trim();
+    const engine = String(body.engineNumber || "").trim();
+
+    const hasPlate = plate !== "" && plate !== "0";
+    const hasChassis = chassis !== "" && chassis !== "0";
+    const hasEngine = engine !== "" && engine !== "0";
+
+    if (!hasPlate && !(hasChassis && hasEngine)) {
+      setMessage({
+        ok: false,
+        text: "Vui lòng cung cấp Biển số xe hoặc cặp Số khung + Số máy"
+      });
+      setBusy(false);
+      return;
     }
-    if (typeof body.engineNumber === "string") {
-      const cleaned = restoreTelexAndUppercase(body.engineNumber).trim().toUpperCase();
-      body.engineNumber = cleaned || "0";
-    } else {
-      body.engineNumber = "0";
+
+    let plateVal = plate || "0";
+    let chassisVal = chassis || "0";
+    let engineVal = engine || "0";
+
+    if (plateVal !== "0") {
+      plateVal = formatPlateNumber(restoreTelexAndUppercase(plateVal));
     }
-    if (typeof body.plateNumber === "string") {
-      body.plateNumber = formatPlateNumber(restoreTelexAndUppercase(body.plateNumber));
+    if (chassisVal !== "0") {
+      chassisVal = restoreTelexAndUppercase(chassisVal).trim().toUpperCase();
     }
+    if (engineVal !== "0") {
+      engineVal = restoreTelexAndUppercase(engineVal).trim().toUpperCase();
+    }
+
+    body.plateNumber = plateVal;
+    body.chassisNumber = chassisVal;
+    body.engineNumber = engineVal;
 
     if (!body.seatCount) delete body.seatCount;
 
@@ -292,28 +324,27 @@ export function NewPolicyPage() {
                 </>
               )}
 
-              {/* Dòng 2: Tên chủ xe - Biển số */}
+              {/* Dòng 2: Họ tên chủ xe - Địa chỉ trên đăng ký */}
               <div className="md:col-span-3">
                 <Field label="Họ tên chủ xe" name="customerName" />
               </div>
               <div className="md:col-span-3">
+                <Field label="Địa chỉ trên đăng ký" name="address" />
+              </div>
+
+              {/* Dòng 3: Biển số - Số khung - Số máy */}
+              <div className="md:col-span-2">
                 <Field
                   label="Biển số"
                   name="plateNumber"
+                  required={false}
                   onInput={handleInput}
                   onBlur={(e) => {
                     e.target.value = formatPlateNumber(e.target.value);
                   }}
                 />
               </div>
-
-              {/* Dòng 3: Địa chỉ */}
-              <div className="md:col-span-6">
-                <Field label="Địa chỉ trên đăng ký" name="address" />
-              </div>
-
-              {/* Dòng 4: Số khung - Số máy */}
-              <div className="md:col-span-3">
+              <div className="md:col-span-2">
                 <Field
                   label="Số khung"
                   name="chassisNumber"
@@ -321,7 +352,7 @@ export function NewPolicyPage() {
                   onInput={handleInput}
                 />
               </div>
-              <div className="md:col-span-3">
+              <div className="md:col-span-2">
                 <Field
                   label="Số máy"
                   name="engineNumber"

@@ -5,15 +5,27 @@ export const singlePolicySchema = z.object({
   customerName: z.string().min(2).max(255),
   phone: z.string().max(30).optional().nullable().or(z.literal("")),
   address: z.string().min(2).max(1000),
-  plateNumber: z.string().min(3).max(50).transform((v) => formatPlateNumber(restoreTelexAndUppercase(v))),
+  plateNumber: z.preprocess((val) => {
+    if (val === undefined || val === null || (typeof val === "string" && val.trim() === "")) return "0";
+    return val;
+  }, z.string().min(1).max(50).transform((v) => {
+    if (v === "0") return "0";
+    return formatPlateNumber(restoreTelexAndUppercase(v));
+  })),
   chassisNumber: z.preprocess((val) => {
     if (val === undefined || val === null || (typeof val === "string" && val.trim() === "")) return "0";
     return val;
-  }, z.string().min(1).max(100).transform((v) => restoreTelexAndUppercase(v).trim().toUpperCase())),
+  }, z.string().min(1).max(100).transform((v) => {
+    if (v === "0") return "0";
+    return restoreTelexAndUppercase(v).trim().toUpperCase();
+  })),
   engineNumber: z.preprocess((val) => {
     if (val === undefined || val === null || (typeof val === "string" && val.trim() === "")) return "0";
     return val;
-  }, z.string().min(1).max(100).transform((v) => restoreTelexAndUppercase(v).trim().toUpperCase())),
+  }, z.string().min(1).max(100).transform((v) => {
+    if (v === "0") return "0";
+    return restoreTelexAndUppercase(v).trim().toUpperCase();
+  })),
   vehicleType: z.string().min(2).max(255),
   seatCount: z.coerce.number().int().min(1).max(100).optional(),
   effectiveDate: z.coerce.date(),
@@ -31,7 +43,26 @@ export const singlePolicySchema = z.object({
 }, {
   message: "Số chỗ mua NNTX lớn hơn Số chỗ ngồi trên xe",
   path: ["passengerCount"]
+}).refine((data) => {
+  const plate = data.plateNumber || "0";
+  const chassis = data.chassisNumber || "0";
+  const engine = data.engineNumber || "0";
+  const hasPlate = plate !== "0" && plate !== "";
+  const hasChassis = chassis !== "0" && chassis !== "";
+  const hasEngine = engine !== "0" && engine !== "";
+  return hasPlate || (hasChassis && hasEngine);
+}, {
+  message: "Vui lòng cung cấp Biển số xe hoặc cặp Số khung + Số máy",
+  path: ["plateNumber"]
+}).refine((data) => {
+  const agent = data.agent?.trim() || "";
+  const phone = data.phone?.trim() || "";
+  return agent !== "" || phone !== "";
+}, {
+  message: "Vui lòng nhập Số điện thoại nhận GCN hoặc Đại lý",
+  path: ["phone"]
 });
 
 export type SinglePolicyInput = z.infer<typeof singlePolicySchema>;
+
 
