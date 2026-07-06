@@ -24,5 +24,6 @@ export const env = z.object({
   DIIN_QUEUE_MODE: z.enum(["bullmq", "sync"]).default("bullmq"),
   UPLOAD_DIR: z.string().default("./uploads"),
   PDF_DIR: z.string().default("./downloads"),
-  MAX_UPLOAD_MB: z.coerce.number().default(20)
+  MAX_UPLOAD_MB: z.coerce.number().default(20),
+  GEMINI_API_KEY: z.string().optional()
 }).parse(process.env);

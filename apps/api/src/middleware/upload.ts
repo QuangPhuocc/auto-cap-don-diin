@@ -19,3 +19,18 @@ export const excelUpload = multer({
     cb(null, true);
   }
 });
+
+export const ocrUpload = multer({
+  storage: multer.diskStorage({
+    destination: env.UPLOAD_DIR,
+    filename: (_req, file, cb) => cb(null, `ocr-${uuid()}${path.extname(file.originalname).toLowerCase()}`)
+  }),
+  limits: { fileSize: env.MAX_UPLOAD_MB * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [".png", ".jpg", ".jpeg", ".pdf"];
+    if (!allowed.includes(path.extname(file.originalname).toLowerCase())) {
+      return cb(new AppError(415, "Chỉ chấp nhận file ảnh (.png, .jpg, .jpeg) hoặc PDF (.pdf)"));
+    }
+    cb(null, true);
+  }
+});

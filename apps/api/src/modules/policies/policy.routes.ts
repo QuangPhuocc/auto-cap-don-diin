@@ -1,13 +1,15 @@
+import fs from "node:fs";
 import path from "node:path";
 import { Router } from "express";
 import { JobType, UserRole, Prisma } from "@prisma/client";
 import xlsx from "xlsx";
 import { z } from "zod";
+import { env } from "../../config/env.js";
 import { asyncHandler } from "../../lib/async-handler.js";
 import { audit } from "../../lib/audit.js";
 import { AppError, assertFound } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
-import { excelUpload } from "../../middleware/upload.js";
+import { excelUpload, ocrUpload } from "../../middleware/upload.js";
 import { enqueuePolicyJob } from "../../queue/policy.queue.js";
 import { inspectExcel, cleanExcelFile } from "./excel.service.js";
 import { singlePolicySchema } from "./policy.schemas.js";
@@ -119,6 +121,113 @@ policyRouter.post("/excel", excelUpload.single("file"), asyncHandler(async (req,
   await audit(req, "POLICY_EXCEL_ENQUEUE", { batchId: result.batch.id, jobId: result.job.id, fileName: path.basename(req.file.path), rows: info.rowCount });
   res.status(202).json({ jobId: result.job.id, batchId: result.batch.id, totalRows: info.rowCount, status: "QUEUED" });
 }));
+
+policyRouter.post("/ocr", ocrUpload.single("file"), asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw new AppError(400, "Vui lòng chọn file ảnh hoặc PDF để nhận diện");
+  }
+
+  const apiKey = env.GEMINI_API_KEY;
+  if (!apiKey) {
+    try { fs.unlinkSync(req.file.path); } catch {}
+    throw new AppError(400, "Chức năng OCR chưa được cấu hình GEMINI_API_KEY trên máy chủ");
+  }
+
+  const filePath = req.file.path;
+  let fileBase64 = "";
+  try {
+    fileBase64 = fs.readFileSync(filePath, { encoding: "base64" });
+  } catch (err) {
+    try { fs.unlinkSync(filePath); } catch {}
+    throw new AppError(500, "Không thể đọc tệp tin đã tải lên");
+  }
+
+  const ext = path.extname(req.file.originalname).toLowerCase();
+  let mimeType = "image/jpeg";
+  if (ext === ".png") mimeType = "image/png";
+  else if (ext === ".pdf") mimeType = "application/pdf";
+
+  const prompt = `Bạn là chuyên gia trích xuất dữ liệu từ hình ảnh hoặc tài liệu đăng ký xe, đăng kiểm xe, hoặc giấy tờ xe của Việt Nam.
+Hãy đọc ảnh/tài liệu này và trích xuất ra các trường thông tin sau và trả về dưới dạng JSON thô.
+Cấu trúc JSON cần trả về:
+{
+  "phone": "Số điện thoại nhận GCN (Nếu thấy số điện thoại của khách hàng/chủ xe viết tay hoặc in trên ảnh, định dạng 10 số. Nếu không thấy thì để null)",
+  "customerName": "Họ và tên chủ xe (phải viết IN HOA có dấu, ví dụ NGUYỄN VĂN A)",
+  "address": "Địa chỉ ghi trên đăng ký xe (đầy đủ tỉnh thành, quận huyện, ví dụ: 123 Đường A, Phường B, Quận C, Hà Nội)",
+  "plateNumber": "Biển số xe (ví dụ: 30A12345 hoặc 29C-123.45. Chuyển về dạng viết liền hoặc có dấu gạch ngang theo đăng ký xe, ví dụ 30A-123.45. Nếu không có biển số, điền null)",
+  "chassisNumber": "Số khung (Chữ in hoa viết liền, ví dụ RLHA123...) hoặc null nếu không đọc được",
+  "engineNumber": "Số máy (Chữ in hoa viết liền, ví dụ 1NZ123...) hoặc null nếu không đọc được",
+  "seatCount": "Số chỗ ngồi (Phải trả về kiểu số nguyên, ví dụ: 5. Nếu không thấy ghi rõ chỗ ngồi nhưng là dòng xe quen thuộc, hãy điền số chỗ phù hợp, ví dụ xe sedan/hatchback điền 5, xe bán tải điền 5, xe tải điền 3. Nếu hoàn toàn không xác định được, điền 5)"
+}
+Lưu ý quan trọng: Chỉ trả về chuỗi JSON thô chứa dữ liệu trích xuất được. Tuyệt đối không bao bọc bởi markdown block \`\`\`json hay bất cứ giải thích nào khác.`;
+
+  try {
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const response = await fetch(geminiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: mimeType,
+                  data: fileBase64
+                }
+              },
+              {
+                text: prompt
+              }
+            ]
+          }
+        ],
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({}));
+      throw new Error(errBody.error?.message || `Lỗi kết nối Gemini API (${response.status})`);
+    }
+
+    const resData = await response.json() as any;
+    const textResult = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    if (!textResult) {
+      throw new Error("Không nhận diện được nội dung từ phản hồi của Gemini");
+    }
+
+    const parsedData = JSON.parse(textResult.trim());
+    
+    res.json({
+      success: true,
+      data: {
+        phone: parsedData.phone || "",
+        customerName: parsedData.customerName || "",
+        address: parsedData.address || "",
+        plateNumber: parsedData.plateNumber || "",
+        chassisNumber: parsedData.chassisNumber || "",
+        engineNumber: parsedData.engineNumber || "",
+        seatCount: typeof parsedData.seatCount === "number" ? parsedData.seatCount : 5
+      }
+    });
+
+  } catch (err) {
+    req.log.error(err, "Gemini OCR failed");
+    res.status(500).json({
+      success: false,
+      message: err instanceof Error ? err.message : "Có lỗi xảy ra khi nhận diện thông tin"
+    });
+  } finally {
+    try { fs.unlinkSync(filePath); } catch {}
+  }
+}));
+
 policyRouter.get("/export", asyncHandler(async (req, res) => {
   const user = req.user!;
   const userIdQuery = req.query.userId ? String(req.query.userId) : undefined;

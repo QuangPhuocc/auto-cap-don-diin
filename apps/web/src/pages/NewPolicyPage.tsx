@@ -67,6 +67,100 @@ export function NewPolicyPage() {
     localStorage.getItem("hasNewPolicy") === "true"
   );
 
+  const [phone, setPhone] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [address, setAddress] = useState("");
+  const [plateNumber, setPlateNumber] = useState("");
+  const [chassisNumber, setChassisNumber] = useState("");
+  const [engineNumber, setEngineNumber] = useState("");
+  const [seatCount, setSeatCount] = useState<number>(5);
+
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrError, setOcrError] = useState<string | null>(null);
+  const [ocrSuccess, setOcrSuccess] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      await processOcrFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      await processOcrFile(e.target.files[0]);
+    }
+  };
+
+  const processOcrFile = async (file: File) => {
+    const allowedTypes = ["image/png", "image/jpeg", "image/jpg", "application/pdf"];
+    if (!allowedTypes.includes(file.type)) {
+      setOcrError("Chỉ chấp nhận file ảnh (PNG, JPG) hoặc tài liệu PDF");
+      setOcrSuccess(null);
+      return;
+    }
+
+    setOcrLoading(true);
+    setOcrError(null);
+    setOcrSuccess(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await api<{
+        success: boolean;
+        data: {
+          phone?: string;
+          customerName?: string;
+          address?: string;
+          plateNumber?: string;
+          chassisNumber?: string;
+          engineNumber?: string;
+          seatCount?: number;
+        };
+        message?: string;
+      }>("/policies/ocr", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res.success && res.data) {
+        const { phone: ocrPhone, customerName: ocrName, address: ocrAddr, plateNumber: ocrPlate, chassisNumber: ocrChassis, engineNumber: ocrEngine, seatCount: ocrSeats } = res.data;
+        
+        if (ocrPhone) setPhone(ocrPhone);
+        if (ocrName) setCustomerName(ocrName);
+        if (ocrAddr) setAddress(ocrAddr);
+        if (ocrPlate) setPlateNumber(ocrPlate);
+        if (ocrChassis) setChassisNumber(ocrChassis);
+        if (ocrEngine) setEngineNumber(ocrEngine);
+        if (ocrSeats) setSeatCount(ocrSeats);
+
+        setOcrSuccess("Nhận diện thông tin và điền form tự động thành công!");
+      } else {
+        setOcrError(res.message || "Nhận diện thông tin thất bại. Vui lòng tự nhập tay.");
+      }
+    } catch (err) {
+      setOcrError(err instanceof Error ? err.message : "Không thể kết nối đến máy chủ để nhận diện OCR");
+    } finally {
+      setOcrLoading(false);
+    }
+  };
+
   useEffect(() => {
     const handleNewPolicy = () => {
       setHasNewPolicy(true);
@@ -228,6 +322,15 @@ export function NewPolicyPage() {
       localStorage.setItem("hasNewPolicy", "true");
       window.dispatchEvent(new Event("newPolicyIssued"));
       form.reset();
+      setPhone("");
+      setCustomerName("");
+      setAddress("");
+      setPlateNumber("");
+      setChassisNumber("");
+      setEngineNumber("");
+      setSeatCount(5);
+      setOcrSuccess(null);
+      setOcrError(null);
     } catch (err) {
       setMessage({
         ok: false,
@@ -266,6 +369,73 @@ export function NewPolicyPage() {
             {/* Ẩn Giới tính (mặc định NAM) và Email (mặc định qphuocins@gmail.com) */}
             <input type="hidden" name="gender" value="NAM" />
             <input type="hidden" name="email" value="qphuocins@gmail.com" />
+
+            {/* OCR Dropzone */}
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold text-stone-700">Tải tài liệu điền tự động (Đăng ký xe / Đăng kiểm / Hoá đơn)</Label>
+              <div 
+                className={`relative flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-6 transition-all duration-300 ${
+                  dragActive 
+                    ? "border-orange-500 bg-orange-50/50 scale-[1.01]" 
+                    : "border-stone-200 hover:border-orange-400 bg-stone-50/50 hover:bg-orange-50/10"
+                }`}
+                onDragEnter={handleDrag}
+                onDragOver={handleDrag}
+                onDragLeave={handleDrag}
+                onDrop={handleDrop}
+              >
+                <input 
+                  type="file" 
+                  id="ocr-file-upload" 
+                  className="hidden" 
+                  accept="image/png, image/jpeg, image/jpg, application/pdf"
+                  onChange={handleFileChange}
+                  disabled={ocrLoading}
+                />
+                <label 
+                  htmlFor="ocr-file-upload" 
+                  className={`flex flex-col items-center justify-center cursor-pointer space-y-2 w-full ${ocrLoading ? "pointer-events-none" : ""}`}
+                >
+                  {ocrLoading ? (
+                    <div className="flex flex-col items-center space-y-2 py-2">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
+                      <p className="text-sm font-medium text-stone-600 animate-pulse">Đang quét ảnh/PDF và nhận diện thông tin...</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="p-3 bg-white rounded-full shadow-sm text-stone-500 border border-stone-100 group-hover:text-orange-500 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                      <div className="text-center">
+                        <span className="text-sm font-semibold text-orange-600 hover:text-orange-700">Click để chọn ảnh/PDF</span>
+                        <span className="text-sm text-stone-500"> hoặc kéo thả vào đây</span>
+                      </div>
+                      <p className="text-xs text-stone-400">Chấp nhận JPG, JPEG, PNG, PDF (Tối đa 20MB)</p>
+                    </>
+                  )}
+                </label>
+              </div>
+              {ocrSuccess && (
+                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 p-2.5 rounded-lg animate-fadeIn">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  {ocrSuccess}
+                </div>
+              )}
+              {ocrError && (
+                <div className="flex items-center gap-2 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-100 p-2.5 rounded-lg animate-fadeIn">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  {ocrError}
+                </div>
+              )}
+            </div>
+
+            <hr className="my-6 border-stone-100" />
 
             <div className="grid gap-4 md:grid-cols-6">
               
@@ -319,7 +489,7 @@ export function NewPolicyPage() {
                     <Field label="Đại lý" name="agent" required={false} />
                   </div>
                   <div className="md:col-span-2">
-                    <Field label="Số điện thoại nhận GCN" name="phone" required={false} />
+                    <Field label="Số điện thoại nhận GCN" name="phone" required={false} value={phone} onChange={(e) => setPhone(e.target.value)} />
                   </div>
                 </>
               ) : (
@@ -328,17 +498,17 @@ export function NewPolicyPage() {
                     <Field label="Đại lý" name="agent" required={false} />
                   </div>
                   <div className="md:col-span-3">
-                    <Field label="Số điện thoại nhận GCN" name="phone" required={false} />
+                    <Field label="Số điện thoại nhận GCN" name="phone" required={false} value={phone} onChange={(e) => setPhone(e.target.value)} />
                   </div>
                 </>
               )}
 
               {/* Dòng 2: Họ tên chủ xe - Địa chỉ trên đăng ký */}
               <div className="md:col-span-3">
-                <Field label="Họ tên chủ xe" name="customerName" />
+                <Field label="Họ tên chủ xe" name="customerName" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
               </div>
               <div className="md:col-span-3">
-                <Field label="Địa chỉ trên đăng ký" name="address" />
+                <Field label="Địa chỉ trên đăng ký" name="address" value={address} onChange={(e) => setAddress(e.target.value)} />
               </div>
 
               {/* Dòng 3: Biển số - Số khung - Số máy */}
@@ -347,9 +517,10 @@ export function NewPolicyPage() {
                   label="Biển số"
                   name="plateNumber"
                   required={false}
-                  onInput={handleInput}
+                  value={plateNumber}
+                  onChange={(e) => setPlateNumber(restoreTelexAndUppercase(e.target.value))}
                   onBlur={(e) => {
-                    e.target.value = formatPlateNumber(e.target.value);
+                    setPlateNumber(formatPlateNumber(e.target.value));
                   }}
                 />
               </div>
@@ -358,7 +529,8 @@ export function NewPolicyPage() {
                   label="Số khung"
                   name="chassisNumber"
                   required={false}
-                  onInput={handleInput}
+                  value={chassisNumber}
+                  onChange={(e) => setChassisNumber(restoreTelexAndUppercase(e.target.value))}
                 />
               </div>
               <div className="md:col-span-2">
@@ -366,7 +538,8 @@ export function NewPolicyPage() {
                   label="Số máy"
                   name="engineNumber"
                   required={false}
-                  onInput={handleInput}
+                  value={engineNumber}
+                  onChange={(e) => setEngineNumber(restoreTelexAndUppercase(e.target.value))}
                 />
               </div>
 
@@ -380,7 +553,7 @@ export function NewPolicyPage() {
                 </Select>
               </div>
               <div className="md:col-span-2">
-                <Field label="Số chỗ ngồi" name="seatCount" type="number" required defaultValue={5} />
+                <Field label="Số chỗ ngồi" name="seatCount" type="number" required value={seatCount} onChange={(e) => setSeatCount(Number(e.target.value))} />
               </div>
               <div className="md:col-span-2 space-y-2">
                 <Label htmlFor="effectiveDate">Ngày bắt đầu hiệu lực</Label>
