@@ -169,6 +169,39 @@ export class DiinService {
     await page.locator("#btn-submit").click();
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(6000); // Chờ 6s luôn theo ý kiến cải tiến của người dùng
+
+    const currentUrl = page.url();
+    if (currentUrl.toUpperCase().includes("/CREATE")) {
+      let errorText = "";
+
+      const validationSummary = page.locator(".validation-summary-errors, .field-validation-error");
+      if (await validationSummary.count() > 0) {
+        const texts = await validationSummary.allInnerTexts();
+        errorText = texts.map(t => t.trim()).filter(Boolean).join("; ");
+      }
+
+      if (!errorText) {
+        const alertElements = page.locator(".alert-danger, .error-message, .swal2-html-container, .swal2-title, #error-msg");
+        if (await alertElements.count() > 0) {
+          const texts = await alertElements.allInnerTexts();
+          errorText = texts.map(t => t.trim()).filter(Boolean).join("; ");
+        }
+      }
+
+      if (!errorText) {
+        const errorNodes = page.locator(".alert, .error, [class*='alert-'], [class*='error-']");
+        if (await errorNodes.count() > 0) {
+          const texts = await errorNodes.allInnerTexts();
+          errorText = texts.map(t => t.trim()).filter(Boolean).join("; ");
+        }
+      }
+
+      if (!errorText) {
+        errorText = "Không thể lưu đơn hàng. Có lỗi xảy ra hoặc thiếu thông tin bắt buộc trên cổng DIIN.";
+      }
+
+      throw new AppError(502, `Cổng DIIN báo lỗi: ${errorText}`, "DIIN_VALIDATION_FAILED");
+    }
     
     return this.collectByPlate(policy.plateNumber, policy.customerName, submissionTime, policyId);
   }
