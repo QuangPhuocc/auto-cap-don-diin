@@ -100,6 +100,12 @@ export async function processPolicyJob(data: PolicyQueueData) {
         where: { id: data.policyId },
         data: { status: PolicyStatus.PROCESSING }
       });
+
+      const queueTimeMs = Date.now() - policy.createdAt.getTime();
+      if (queueTimeMs > 60000) {
+        throw new Error("Quá thời gian chờ xếp hàng (giới hạn 60 giây). Đơn đã tự động hủy.");
+      }
+
       const result = await diin.issueSingle(policy, policy.id);
       await prisma.policy.update({
         where: { id: policy.id },
