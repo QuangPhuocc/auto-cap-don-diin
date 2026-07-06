@@ -5,7 +5,7 @@ const conn = new Client();
 conn.on("ready", () => {
   console.log("SSH Connected. Fetching status...");
   
-  conn.exec("curl -i http://localhost:5174/api/health", (err, stream) => {
+  conn.exec("cd /root/auto-cap-don-diin-staging/apps/web && npx vite preview --host 0.0.0.0 --port 5175 & sleep 5 && curl -i http://127.0.0.1:5175/api/health && kill $!", (err, stream) => {
     if (err) {
       console.error(err);
       conn.end();
