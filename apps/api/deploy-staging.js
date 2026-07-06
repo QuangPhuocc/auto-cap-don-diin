@@ -56,6 +56,7 @@ const commands = [
   // 6. Write env configurations
   `cat << 'EOF' > /root/auto-cap-don-diin-staging/.env\n${envContent}\nEOF`,
   `cat << 'EOF' > /root/auto-cap-don-diin-staging/apps/api/.env\n${envContent}\nEOF`,
+  `cat << 'EOF' > /root/auto-cap-don-diin-staging/apps/web/.env\n${envContent}\nEOF`,
 
   // 7. Install libraries
   "cd /root/auto-cap-don-diin-staging && pnpm install --no-frozen-lockfile",

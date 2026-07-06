@@ -1,6 +1,14 @@
 import { Client } from "ssh2";
+import dotenv from "dotenv";
+import path from "node:path";
+
+// Load dotenv to fetch GEMINI_API_KEY if present in local .env
+dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 const conn = new Client();
+
+const geminiKey = process.env.GEMINI_API_KEY || "";
 
 const envContent = `NODE_ENV=production
 PORT=4000
@@ -22,6 +30,7 @@ MAX_UPLOAD_MB=20
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=ChangeMe123!
 ADMIN_FULL_NAME=Quản trị viên
+GEMINI_API_KEY=${geminiKey}
 `;
 
 const commands = [
@@ -47,6 +56,7 @@ const commands = [
   // 6. Write env configurations
   `cat << 'EOF' > /root/auto-cap-don-diin/.env\n${envContent}\nEOF`,
   `cat << 'EOF' > /root/auto-cap-don-diin/apps/api/.env\n${envContent}\nEOF`,
+  `cat << 'EOF' > /root/auto-cap-don-diin/apps/web/.env\n${envContent}\nEOF`,
 
   // 7. Install libraries
   "cd /root/auto-cap-don-diin && pnpm install --no-frozen-lockfile",
