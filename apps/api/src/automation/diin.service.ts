@@ -150,8 +150,8 @@ export class DiinService {
       await page.locator("#PassengerFee").selectOption(String(policy.passengerFee));
     }
     if (policy.email) await page.locator("#Email").fill(policy.email);
-    if (policy.chassisNumber && policy.chassisNumber !== "0") await page.locator("#ChassisNumber").fill(policy.chassisNumber);
-    if (policy.engineNumber && policy.engineNumber !== "0") await page.locator("#MachineNumber").fill(policy.engineNumber);
+    if (policy.chassisNumber != null && policy.chassisNumber !== "") await page.locator("#ChassisNumber").fill(policy.chassisNumber);
+    if (policy.engineNumber != null && policy.engineNumber !== "") await page.locator("#MachineNumber").fill(policy.engineNumber);
     let effDate = policy.effectiveDate ? new Date(policy.effectiveDate) : new Date();
     const now = new Date();
     if (effDate.getTime() < now.getTime()) {

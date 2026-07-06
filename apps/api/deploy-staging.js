@@ -14,7 +14,7 @@ const envContent = `NODE_ENV=production
 PORT=4001
 WEB_URL=http://103.211.200.219:5174
 DATABASE_URL=file:/var/database/staging.db?connection_limit=1&busy_timeout=30000
-REDIS_URL=redis://127.0.0.1:6379
+REDIS_URL=redis://127.0.0.1:6379/1
 JWT_SECRET=diin-local-dev-secret-0941941049-allow-real-issue
 JWT_EXPIRES_IN=30d
 DIIN_BASE_URL=https://daily.diin.com.vn
