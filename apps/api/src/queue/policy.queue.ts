@@ -3,14 +3,20 @@ import { env } from "../config/env.js";
 import { redis } from "../lib/redis.js";
 
 export const POLICY_QUEUE = `diin-policy-${env.PORT}`;
-export type SinglePolicyQueueData = { type: "SINGLE_POLICY"; dbJobId: string; policyId: string };
-export type ExcelQueueData = { type: "EXCEL_UPLOAD"; dbJobId: string; batchId: string; filePath: string };
-export type PolicyQueueData = SinglePolicyQueueData | ExcelQueueData;
 
-export const policyQueue = env.DIIN_QUEUE_MODE === "bullmq" ? new Queue<PolicyQueueData, void, string>(POLICY_QUEUE, {
-  connection: redis!,
-  defaultJobOptions: { attempts: 1, removeOnComplete: 500, removeOnFail: 1000 }
-}) : null;
+/** Chỉ còn SINGLE_POLICY — đã loại bỏ Excel upload */
+export type PolicyQueueData = { type: "SINGLE_POLICY"; dbJobId: string; policyId: string };
+
+export const policyQueue = env.DIIN_QUEUE_MODE === "bullmq"
+  ? new Queue<PolicyQueueData, void, string>(POLICY_QUEUE, {
+      connection: redis!,
+      defaultJobOptions: {
+        attempts: 1,
+        removeOnComplete: 500,
+        removeOnFail: 1000
+      }
+    })
+  : null;
 
 export async function enqueuePolicyJob(data: PolicyQueueData) {
   if (env.DIIN_QUEUE_MODE === "sync") {

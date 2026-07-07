@@ -9,9 +9,8 @@ import { asyncHandler } from "../../lib/async-handler.js";
 import { audit } from "../../lib/audit.js";
 import { AppError, assertFound } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
-import { excelUpload, ocrUpload } from "../../middleware/upload.js";
+import { ocrUpload } from "../../middleware/upload.js";
 import { enqueuePolicyJob } from "../../queue/policy.queue.js";
-import { inspectExcel, cleanExcelFile } from "./excel.service.js";
 import { singlePolicySchema } from "./policy.schemas.js";
 
 export const policyRouter = Router();
@@ -106,21 +105,7 @@ policyRouter.post("/single", asyncHandler(async (req, res) => {
   res.status(202).json({ jobId: result.job.id, policyId: result.policy.id, status: "QUEUED" });
 }));
 
-policyRouter.post("/excel", excelUpload.single("file"), asyncHandler(async (req, res) => {
-  if (!req.file) throw new AppError(400, "Vui lòng chọn file Excel");
-  cleanExcelFile(req.file.path);
-  let info;
-  try { info = inspectExcel(req.file.path); } catch (error) { throw error; }
-  const result = await prisma.$transaction(async (tx) => {
-    const job = await tx.job.create({ data: { userId: req.user!.id, type: JobType.EXCEL_UPLOAD, payload: { filePath: req.file!.path, originalName: req.file!.originalname, rowCount: info.rowCount } } });
-    const batch = await tx.batchUpload.create({ data: { userId: req.user!.id, jobId: job.id, filePath: req.file!.path, originalName: req.file!.originalname, totalRows: info.rowCount } });
-    return { job, batch };
-  });
-  const queued = await enqueuePolicyJob({ type: "EXCEL_UPLOAD", dbJobId: result.job.id, batchId: result.batch.id, filePath: req.file.path });
-  await prisma.job.update({ where: { id: result.job.id }, data: { bullJobId: String(queued.id) } });
-  await audit(req, "POLICY_EXCEL_ENQUEUE", { batchId: result.batch.id, jobId: result.job.id, fileName: path.basename(req.file.path), rows: info.rowCount });
-  res.status(202).json({ jobId: result.job.id, batchId: result.batch.id, totalRows: info.rowCount, status: "QUEUED" });
-}));
+// Excel upload đã bị loại bỏ theo yêu cầu
 
 policyRouter.post("/ocr", ocrUpload.single("file"), asyncHandler(async (req, res) => {
   if (!req.file) {
@@ -371,8 +356,6 @@ policyRouter.get("/:id/pdf", asyncHandler(async (req, res) => {
   const id = String(req.params.id);
   const policy = assertFound(await prisma.policy.findUnique({ where: { id } }));
   if (req.user!.role === UserRole.CTV && policy.userId !== req.user!.id) throw new AppError(403, "Bạn không có quyền tải GCN");
-  if (!policy.pdfPath) throw new AppError(404, "GCN PDF chưa sẵn sàng");
-  
-  const cleanName = policy.plateNumber.toUpperCase().replace(/[^A-Z0-9\s]/g, "").replace(/\s+/g, " ").trim();
-  res.download(path.resolve(policy.pdfPath), `${cleanName}.pdf`);
+  if (!policy.pdfUrl) throw new AppError(404, "GCN PDF chưa sẵn sàng");
+  res.redirect(policy.pdfUrl);
 }));

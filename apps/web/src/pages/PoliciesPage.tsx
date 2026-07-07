@@ -240,7 +240,7 @@ export function PoliciesPage() {
                   <td className="p-3 text-muted-foreground">{dateTime(p.createdAt)}</td>
                   <td className="p-3">
                     <div className="flex items-center gap-2">
-                      {p.pdfPath && (
+                      {p.pdfUrl && (
                         <Button
                           size="sm"
                           variant="outline"

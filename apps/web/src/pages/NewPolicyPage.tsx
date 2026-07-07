@@ -1,5 +1,5 @@
 import { Send } from "lucide-react";
-import { FormEvent, useState, useEffect, InputHTMLAttributes } from "react";
+import { FormEvent, useState, useEffect, useRef, InputHTMLAttributes } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Select } from "../components/ui";
@@ -66,6 +66,8 @@ export function NewPolicyPage() {
   const [hasNewPolicy, setHasNewPolicy] = useState(
     localStorage.getItem("hasNewPolicy") === "true"
   );
+
+  const submittingRef = useRef(false);
 
   const [phone, setPhone] = useState("");
   const [customerName, setCustomerName] = useState("");
@@ -227,6 +229,8 @@ export function NewPolicyPage() {
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     const form = e.currentTarget;
     setBusy(true);
     setMessage(null);
@@ -337,6 +341,7 @@ export function NewPolicyPage() {
         text: err instanceof Error ? err.message : "Không tạo được đơn"
       });
     } finally {
+      submittingRef.current = false;
       setBusy(false);
     }
   }

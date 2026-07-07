@@ -1,178 +1,96 @@
-import { BatchStatus, JobStatus, PolicyStatus } from "@prisma/client";
+import { JobStatus, PolicyStatus } from "@prisma/client";
+import path from "node:path";
 import { DiinService } from "../automation/diin.service.js";
 import { prisma } from "../lib/prisma.js";
 import type { PolicyQueueData } from "../queue/policy.queue.js";
-import XLSX from "xlsx";
-import path from "node:path";
 
-function parseExcelPolicies(filePath: string): Record<string, any> {
-  const workbook = XLSX.readFile(filePath, { cellDates: true });
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: "" });
-  if (!rows.length) return {};
-  
-  const headers = (rows[0] as unknown[]).map(h => String(h || "").trim().toUpperCase().replace(/\s+/g, " "));
-  
-  const plateIdx = headers.indexOf("BIỂN SỐ");
-  const typeIdx = headers.indexOf("LOẠI XE");
-  const seatIdx = headers.indexOf("SỐ CHỔ");
-  const nameIdx = headers.indexOf("HỌ TÊN CHỦ XE");
-  const chassisIdx = headers.indexOf("SỐ KHUNG");
-  const engineIdx = headers.indexOf("SỐ MÁY");
-  const passengerIdx = headers.indexOf("SỐ HÀNH KHÁCH ĐƯỢC BẢO HIỂM");
-  const feeIdx = headers.indexOf("PHÍ BẢO HIỂM/ 1 CHỔ NGỒI");
-  const phoneIdx = headers.indexOf("SỐ ĐIỆN THOẠI NHẬN GCN");
-  const emailIdx = headers.indexOf("EMAIL");
-  const addrIdx = headers.indexOf("ĐỊA CHỈ") !== -1 ? headers.indexOf("ĐỊA CHỈ") : headers.indexOf("ĐẠI CHỈ");
-  const genderIdx = headers.indexOf("GIỚI TÍNH");
-  const dateIdx = headers.indexOf("NGÀY BẮT ĐẦU HIỆU LỰC");
-  const hourIdx = headers.indexOf("GIỜ");
-  const minIdx = headers.indexOf("PHÚT");
-  const yearsIdx = headers.indexOf("SỐ NĂM BẢO HIỂM");
-  const agentIdx = headers.indexOf("ĐẠI LÝ");
-
-  const map: Record<string, any> = {};
-  
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    if (!row || !row.some(c => String(c ?? "").trim() !== "")) continue;
-    
-    const rawPlate = String(row[plateIdx] || "").trim();
-    if (!rawPlate) continue;
-    const plateKey = rawPlate.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    
-    // Parse Date
-    let effectiveDate: Date | null = null;
-    const rawDate = row[dateIdx];
-    if (rawDate instanceof Date) {
-      effectiveDate = rawDate;
-    } else if (rawDate) {
-      const parts = String(rawDate).split(/[-/]/);
-      if (parts.length === 3) {
-        const day = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10) - 1;
-        const year = parseInt(parts[2], 10);
-        effectiveDate = new Date(year, month, day);
-      }
-    }
-    
-    if (effectiveDate) {
-      const hour = parseInt(String(row[hourIdx] || "0"), 10);
-      const minute = parseInt(String(row[minIdx] || "0"), 10);
-      effectiveDate.setHours(hour, minute, 0, 0);
-    }
-    
-    map[plateKey] = {
-      customerName: row[nameIdx] ? String(row[nameIdx]).trim() : "",
-      phone: row[phoneIdx] ? String(row[phoneIdx]).trim() : null,
-      address: row[addrIdx] ? String(row[addrIdx]).trim() : null,
-      plateNumber: rawPlate,
-      chassisNumber: row[chassisIdx] ? String(row[chassisIdx]).trim() : null,
-      engineNumber: row[engineIdx] ? String(row[engineIdx]).trim() : null,
-      vehicleType: row[typeIdx] ? String(row[typeIdx]).trim() : null,
-      seatCount: row[seatIdx] ? parseInt(row[seatIdx], 10) : null,
-      effectiveDate,
-      gender: row[genderIdx] ? String(row[genderIdx]).trim().toUpperCase() : "NAM",
-      passengerCount: row[passengerIdx] ? parseInt(row[passengerIdx], 10) : 0,
-      passengerFee: row[feeIdx] ? parseInt(row[feeIdx], 10) : 0,
-      email: row[emailIdx] ? String(row[emailIdx]).trim() : null,
-      insuranceYears: row[yearsIdx] ? parseInt(row[yearsIdx], 10) : 1,
-      agent: row[agentIdx] ? String(row[agentIdx]).trim() : null,
-    };
-  }
-  
-  return map;
-}
-
+/**
+ * processPolicyJob — Xử lý 1 job SINGLE_POLICY.
+ *
+ * Kiến trúc multi-tab:
+ * - Gọi DiinService.create() → lấy tab mới từ DiinBrowserPool (browser dùng chung)
+ * - Sau khi xong, đóng tab (không đóng browser)
+ * - Nhiều job có thể chạy song song nhờ BullMQ concurrency > 1
+ *
+ * Note: Excel upload đã bị loại bỏ hoàn toàn.
+ */
 export async function processPolicyJob(data: PolicyQueueData) {
+  // Đánh dấu job bắt đầu xử lý
   await prisma.job.update({
     where: { id: data.dbJobId },
-    data: { status: JobStatus.PROCESSING, startedAt: new Date(), attempts: { increment: 1 }, progress: 5 }
+    data: {
+      status: JobStatus.PROCESSING,
+      startedAt: new Date(),
+      attempts: { increment: 1 },
+      progress: 5
+    }
   });
 
-  const diin = new DiinService();
+  // Lấy 1 tab từ pool (browser dùng chung, session DIIN đã đăng nhập)
+  const diin = await DiinService.create(data.dbJobId);
+
   try {
-    await diin.start();
+    const policy = await prisma.policy.update({
+      where: { id: data.policyId },
+      data: { status: PolicyStatus.PROCESSING }
+    });
 
-    if (data.type === "SINGLE_POLICY") {
-      const policy = await prisma.policy.update({
-        where: { id: data.policyId },
-        data: { status: PolicyStatus.PROCESSING }
-      });
-
-      const queueTimeMs = Date.now() - policy.createdAt.getTime();
-      if (queueTimeMs > 60000) {
-        throw new Error("Quá thời gian chờ xếp hàng (giới hạn 60 giây). Đơn đã tự động hủy.");
-      }
-
-      const result = await diin.issueSingle(policy, policy.id);
-      await prisma.policy.update({
-        where: { id: policy.id },
-        data: { ...result, status: PolicyStatus.ISSUED, issuedAt: new Date(), error: null }
-      });
-    } else {
-      const batch = await prisma.batchUpload.update({
-        where: { id: data.batchId },
-        data: { status: BatchStatus.PROCESSING }
-      });
-
-      // Parse the excel file details
-      let excelDetailsMap: Record<string, any> = {};
-      try {
-        excelDetailsMap = parseExcelPolicies(data.filePath);
-      } catch (err) {
-        console.error("Failed to parse excel details:", err);
-      }
-
-      const results = await diin.issueExcel(data.filePath);
-      await prisma.$transaction(async (tx) => {
-        for (const result of results) {
-          const detail = excelDetailsMap[result.plateNumber.toUpperCase().replace(/[^A-Z0-9]/g, "")] || 
-                         excelDetailsMap[result.plateNumber] || {};
-          await tx.policy.create({
-            data: {
-              ...detail,
-              ...result,
-              userId: batch.userId,
-              batchId: batch.id,
-              jobId: data.dbJobId,
-              status: PolicyStatus.ISSUED,
-              issuedAt: new Date()
-            }
-          });
-        }
-        await tx.batchUpload.update({
-          where: { id: batch.id },
-          data: {
-            status: BatchStatus.COMPLETED,
-            issuedRows: results.length,
-            failedRows: Math.max(0, batch.totalRows - results.length)
-          }
-        });
-      });
+    // Kiểm tra thời gian chờ trong queue
+    // Tăng lên 3600s (1 tiếng) để cho phép 50+ người dùng đồng thời
+    const queueTimeMs = Date.now() - policy.createdAt.getTime();
+    if (queueTimeMs > 3600000) {
+      throw new Error(`Quá thời gian chờ xếp hàng (đã chờ ${Math.round(queueTimeMs / 60000)} phút). Đơn đã tự động hủy.`);
     }
+
+    // Phát hành đơn
+    const result = await diin.issueSingle(policy, policy.id);
+
+    // Lưu kết quả
+    await prisma.policy.update({
+      where: { id: policy.id },
+      data: {
+        certificateNumber: result.certificateNumber,
+        serialNumber: result.serialNumber,
+        premium: result.premium != null ? String(result.premium) : undefined,
+        pdfUrl: result.pdfUrl ?? undefined,
+        pdfPath: result.pdfPath ?? undefined,
+        plateNumber: result.plateNumber || policy.plateNumber,
+        customerName: result.customerName || policy.customerName,
+        status: PolicyStatus.ISSUED,
+        issuedAt: new Date(),
+        error: null
+      }
+    });
 
     await prisma.job.update({
       where: { id: data.dbJobId },
       data: { status: JobStatus.COMPLETED, progress: 100, completedAt: new Date(), error: null }
     });
+
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+
+    // Chụp screenshot debug khi lỗi
     try {
-      await diin.captureScreenshot(path.resolve(`screenshot-error-${data.dbJobId}.png`));
-      console.log(`Captured error screenshot to screenshot-error-${data.dbJobId}.png`);
-    } catch (screenshotError) {
-      console.error("Failed to capture error screenshot:", screenshotError);
+      const screenshotPath = path.resolve(`./debug/screenshot-error-${data.dbJobId}.png`);
+      await diin.captureScreenshot(screenshotPath);
+      console.log(`[Worker] Screenshot lỗi: ${screenshotPath}`);
+    } catch {
+      // Bỏ qua lỗi screenshot
     }
-    await prisma.job.update({ where: { id: data.dbJobId }, data: { status: JobStatus.FAILED, error: message } });
-    if (data.type === "SINGLE_POLICY") {
-      await prisma.policy.update({ where: { id: data.policyId }, data: { status: PolicyStatus.FAILED, error: message } });
-    } else {
-      await prisma.batchUpload.update({ where: { id: data.batchId }, data: { status: BatchStatus.FAILED } });
-    }
+
+    await prisma.job.update({
+      where: { id: data.dbJobId },
+      data: { status: JobStatus.FAILED, error: message }
+    });
+    await prisma.policy.update({
+      where: { id: data.policyId },
+      data: { status: PolicyStatus.FAILED, error: message }
+    });
+
     throw error;
   } finally {
-    await diin.stop();
+    // Đóng tab, KHÔNG đóng browser (browser dùng chung)
+    await diin.close();
   }
 }

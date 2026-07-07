@@ -1,96 +1,83 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-import { chromium, type Browser, type Locator, type Page } from "playwright";
-import * as XLSX from "xlsx";
+import type { Locator, Page } from "playwright";
 import { env } from "../config/env.js";
 import { AppError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
+import { diinPool, submitMutex } from "./diin.pool.js";
 import { diinSelectors } from "./diin.selectors.js";
 import type { IssuedPolicyResult, SinglePolicyRecord } from "./diin.types.js";
 
+/**
+ * DiinService — Xử lý 1 job phát hành trên 1 tab (Page) riêng biệt.
+ *
+ * Khởi tạo bằng cách gọi DiinService.create() để lấy tab từ pool.
+ * Sau khi xong phải gọi close() để đóng tab.
+ *
+ * Không tự quản lý Browser/Context — được inject từ DiinBrowserPool.
+ */
 export class DiinService {
-  private browser?: Browser;
-  private page?: Page;
+  private page: Page;
+  private jobId?: string;
 
-  private assertConfigured() {
-    if (!env.DIIN_USERNAME || !env.DIIN_PASSWORD) throw new AppError(503, "Chưa cấu hình tài khoản DIIN", "DIIN_NOT_CONFIGURED");
+  private constructor(page: Page, jobId?: string) {
+    this.page = page;
+    this.jobId = jobId;
   }
 
-  private assertIssueAllowed() {
-    if (!env.DIIN_ALLOW_ISSUE) throw new AppError(503, "Chế độ phát hành DIIN đang bị khóa an toàn (DIIN_ALLOW_ISSUE=false)", "DIIN_ISSUE_DISABLED");
+  /** Factory — lấy 1 tab mới từ pool */
+  static async create(jobId?: string): Promise<DiinService> {
+    const page = await diinPool.acquirePage();
+    return new DiinService(page, jobId);
   }
 
-  async start() {
-    this.assertConfigured();
-    this.browser = await chromium.launch({ headless: env.DIIN_HEADLESS });
-    const context = await this.browser.newContext({
-      acceptDownloads: true,
-      locale: "vi-VN",
-      recordVideo: {
-        dir: "./videos-production",
-        size: { width: 1280, height: 720 }
-      }
-    });
-    this.page = await context.newPage();
-    this.page.setDefaultTimeout(env.DIIN_TIMEOUT_MS);
-    await this.login();
-  }
-
-  async stop() {
-    await this.browser?.close();
-    this.browser = undefined;
-    this.page = undefined;
-  }
-
-  async captureScreenshot(outputPath: string) {
-    if (this.page) {
-      await this.page.screenshot({ path: outputPath, fullPage: true });
+  /** Đóng tab sau khi xong */
+  async close(): Promise<void> {
+    try {
+      await this.page.close();
+    } catch {
+      // Bỏ qua lỗi khi đóng tab
     }
   }
 
-  private get activePage() {
-    if (!this.page) throw new Error("DIIN browser chưa được khởi tạo");
-    return this.page;
+  /** Chụp screenshot — dùng khi debug */
+  async captureScreenshot(outputPath: string): Promise<void> {
+    try {
+      await this.page.screenshot({ path: outputPath, fullPage: true });
+    } catch {
+      // Bỏ qua lỗi screenshot
+    }
   }
 
-  private async firstExisting(selectors: readonly string[]) {
+  private assertIssueAllowed() {
+    if (!env.DIIN_ALLOW_ISSUE) {
+      throw new AppError(503, "Chế độ phát hành DIIN đang bị khóa an toàn (DIIN_ALLOW_ISSUE=false)", "DIIN_ISSUE_DISABLED");
+    }
+  }
+
+  /**
+   * Kiểm tra session DIIN còn hợp lệ không.
+   * Nếu bị redirect về login → re-login qua pool.
+   */
+  private async ensureSession(currentUrl: string): Promise<boolean> {
+    const url = currentUrl.toLowerCase();
+    const isLoginPage = url.includes("/login") || url.includes("/signin") || url.includes("/account/login");
+    if (isLoginPage) {
+      console.log(`[DIIN:${this.jobId}] Session hết hạn — yêu cầu re-login qua pool...`);
+      await diinPool.relogin();
+      return true; // Đã re-login
+    }
+    return false;
+  }
+
+  private async firstExisting(selectors: readonly string[]): Promise<Locator> {
     for (const selector of selectors) {
-      const locator = this.activePage.locator(selector).first();
+      const locator = this.page.locator(selector).first();
       if (await locator.count().catch(() => 0)) return locator;
     }
     throw new AppError(502, `Không tìm thấy phần tử DIIN: ${selectors.join(" | ")}`, "DIIN_SELECTOR_NOT_FOUND");
   }
 
-  private async login() {
-    const page = this.activePage;
-    await page.goto(env.DIIN_BASE_URL, { waitUntil: "domcontentloaded" });
-    if (await page.getByText(/Bảng kê Bảo hiểm/i).first().isVisible().catch(() => false)) return;
-    await (await this.firstExisting(diinSelectors.login.username)).evaluate((el, value) => {
-      const input = el as HTMLInputElement;
-      input.value = String(value);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    }, env.DIIN_USERNAME);
-    await (await this.firstExisting(diinSelectors.login.password)).evaluate((el, value) => {
-      const input = el as HTMLInputElement;
-      input.value = String(value);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    }, env.DIIN_PASSWORD);
-    await page.locator("form").first().evaluate((form) => (form as HTMLFormElement).submit());
-    const loggedIn = await page
-      .locator("a", { hasText: "Bảng kê Bảo hiểm" })
-      .first()
-      .waitFor({ state: "visible", timeout: 15000 })
-      .then(() => true)
-      .catch(() => false);
-    if (!loggedIn) {
-      throw new AppError(502, "Đăng nhập DIIN thất bại", "DIIN_LOGIN_FAILED");
-    }
-  }
-
   private async controlForLabel(label: string, kind: "input" | "select" | "textarea" = "input"): Promise<Locator> {
-    const page = this.activePage;
+    const page = this.page;
     const byLabel = page.getByLabel(label, { exact: false }).first();
     if (await byLabel.count()) return byLabel;
     const labelNode = page.locator("label", { hasText: label }).first();
@@ -105,231 +92,299 @@ export class DiinService {
     throw new AppError(502, `Không tìm thấy trường '${label}' trên DIIN`, "DIIN_FIELD_NOT_FOUND");
   }
 
-  private async fill(label: string, value: string | null | undefined) {
+  private async fill(label: string, value: string | null | undefined): Promise<void> {
     if (value == null || value === "") return;
     await (await this.controlForLabel(label)).fill(String(value));
   }
 
-  private async choose(label: string, text: string | null | undefined) {
+  private async choose(label: string, text: string | null | undefined): Promise<void> {
     if (!text) return;
     const control = await this.controlForLabel(label, "select");
-    if ((await control.evaluate((el) => el.tagName)) === "SELECT") await control.selectOption({ label: text });
-    else {
+    if ((await control.evaluate((el) => el.tagName)) === "SELECT") {
+      await control.selectOption({ label: text });
+    } else {
       await control.click();
-      await this.activePage.getByText(text, { exact: true }).last().click();
+      await this.page.getByText(text, { exact: true }).last().click();
     }
   }
 
-  private async clickButton(name: RegExp) {
-    const page = this.activePage;
-    const button = page.getByRole("button", { name }).last();
-    if (await button.count()) return button.click();
-    const text = page.getByText(name).last();
-    if (await text.count()) return text.click();
-    throw new AppError(502, `Không tìm thấy nút ${name}`, "DIIN_BUTTON_NOT_FOUND");
-  }
-
+  /**
+   * Phát hành 1 đơn đơn lẻ.
+   *
+   * Sau khi submit thành công, ưu tiên đọc GCN từ trang kết quả (không dùng list search)
+   * để tránh nhầm lẫn khi nhiều job cùng biển số chạy song song.
+   */
   async issueSingle(policy: SinglePolicyRecord, policyId?: string): Promise<IssuedPolicyResult> {
     this.assertIssueAllowed();
-    const page = this.activePage;
-    await page.goto(`${env.DIIN_BASE_URL}${diinSelectors.links.issuedCarsCreate}`, { waitUntil: "networkidle" });
+    const page = this.page;
+
+    // Điều hướng đến trang tạo mới
+    await page.goto(`${env.DIIN_BASE_URL}${diinSelectors.links.issuedCarsCreate}`, {
+      waitUntil: "domcontentloaded"
+    });
+    // Đợi form sẵn sàng
+    await page.locator("#Fullname").waitFor({ state: "visible", timeout: 20000 });
+
+    // ── Điền thông tin ──────────────────────────────────────────────
     await page.locator("#Fullname").fill(policy.customerName);
-    if (policy.phone) await page.locator("#Phone").fill(policy.phone);
-    if (policy.address) await page.locator("#Address").fill(policy.address);
-    if (policy.vehicleType) await page.locator("#AutomobilesFullTypeName").selectOption({ label: policy.vehicleType });
-    if (policy.seatCount) await page.locator("#Attributes_Seat").fill(String(policy.seatCount));
-    if (policy.plateNumber && policy.plateNumber !== "0") {
+
+    if (policy.phone) {
+      await page.locator("#Phone").fill(policy.phone);
+    }
+    if (policy.address) {
+      await page.locator("#Address").fill(policy.address);
+    }
+    if (policy.vehicleType) {
+      await page.locator("#AutomobilesFullTypeName").selectOption({ label: policy.vehicleType });
+    }
+    if (policy.seatCount) {
+      await page.locator("#Attributes_Seat").fill(String(policy.seatCount));
+    }
+
+    // Biển số: KHÔNG điền nếu null/undefined/empty/"0"
+    const hasPlate = policy.plateNumber && policy.plateNumber !== "0" && policy.plateNumber.trim() !== "";
+    if (hasPlate) {
       await page.locator("#LicensePlates").fill(policy.plateNumber);
     }
+
     if (policy.gender) {
       const genderVal = policy.gender === "NỮ" ? "0" : "1";
       await page.locator("#Gender").selectOption(genderVal);
     }
+
     await page.locator("#PassengerCount").fill(String(policy.passengerCount ?? 0));
+
     if (policy.passengerFee !== undefined && policy.passengerFee !== null) {
       await page.locator("#PassengerFee").selectOption(String(policy.passengerFee));
     }
-    if (policy.email) await page.locator("#Email").fill(policy.email);
-    if (policy.chassisNumber != null && policy.chassisNumber !== "") await page.locator("#ChassisNumber").fill(policy.chassisNumber);
-    if (policy.engineNumber != null && policy.engineNumber !== "") await page.locator("#MachineNumber").fill(policy.engineNumber);
+    if (policy.email) {
+      await page.locator("#Email").fill(policy.email);
+    }
+    if (policy.chassisNumber != null && policy.chassisNumber !== "" && policy.chassisNumber !== "0") {
+      await page.locator("#ChassisNumber").fill(policy.chassisNumber);
+    }
+    if (policy.engineNumber != null && policy.engineNumber !== "" && policy.engineNumber !== "0") {
+      await page.locator("#MachineNumber").fill(policy.engineNumber);
+    }
+
+    // Thời gian hiệu lực — tự động đẩy lên hiện tại nếu quá khứ
     let effDate = policy.effectiveDate ? new Date(policy.effectiveDate) : new Date();
     const now = new Date();
     if (effDate.getTime() < now.getTime()) {
-      // Nếu thời gian hiệu lực ở quá khứ do độ trễ hàng đợi, tự động đổi thành thời điểm hiện tại cộng 2 phút cho an toàn
       effDate = new Date(now.getTime() + 2 * 60 * 1000);
     }
     await page.locator("#EffectiveDate").fill(this.formatDate(effDate));
     await page.locator("#NumberYearInsure").fill(String(policy.insuranceYears ?? 1));
+
     if (policy.agent) {
       await page.locator("#AgentName").fill(policy.agent);
     }
-    
-    const submissionTime = new Date();
-    // Bấm Lưu (Cổng DIIN tự động phát hành thẻ bảo hiểm)
-    await page.locator("#btn-submit").click();
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(6000); // Chờ 6s luôn theo ý kiến cải tiến của người dùng
 
-    const currentUrl = page.url();
-    if (currentUrl.toUpperCase().includes("/CREATE")) {
-      let errorText = "";
+    // ── Submit ──────────────────────────────────────────────────────
+    const release = await submitMutex.acquire();
+    try {
+      const submissionTime = new Date();
+      await page.locator("#btn-submit").click();
 
-      const validationSummary = page.locator(".validation-summary-errors, .field-validation-error");
-      if (await validationSummary.count() > 0) {
-        const texts = await validationSummary.allInnerTexts();
-        errorText = texts.map(t => t.trim()).filter(Boolean).join("; ");
+      // Đợi trang chuyển trạng thái: URL thay đổi HOẶC popup lỗi xuất hiện
+      await Promise.race([
+        page.waitForURL((url) => !url.toString().toUpperCase().includes("/CREATE"), { timeout: env.DIIN_TIMEOUT_MS }),
+        page.waitForSelector(".swal2-popup, .validation-summary-errors, .alert-danger, #error-msg", { timeout: env.DIIN_TIMEOUT_MS })
+      ]).catch(() => {/* timeout — kiểm tra URL bên dưới */});
+
+      // Xử lý popup SweetAlert2 nếu có
+      const swalConfirm = page.locator(".swal2-confirm");
+      if (await swalConfirm.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await swalConfirm.click();
+        await page.waitForTimeout(1000);
       }
 
-      if (!errorText) {
-        const alertElements = page.locator(".alert-danger, .error-message, .swal2-html-container, .swal2-title, #error-msg");
-        if (await alertElements.count() > 0) {
-          const texts = await alertElements.allInnerTexts();
-          errorText = texts.map(t => t.trim()).filter(Boolean).join("; ");
+      const currentUrl = page.url();
+
+      // Kiểm tra session hết hạn
+      if (await this.ensureSession(currentUrl)) {
+        throw new AppError(502, "Session DIIN hết hạn giữa chừng. Vui lòng thử lại.", "DIIN_SESSION_EXPIRED");
+      }
+
+      // Còn ở trang Create → DIIN báo lỗi validation
+      if (currentUrl.toUpperCase().includes("/CREATE")) {
+        const errorText = await this.extractPageErrors();
+        throw new AppError(502, `Cổng DIIN báo lỗi: ${errorText}`, "DIIN_VALIDATION_FAILED");
+      }
+
+      // ── Đọc GCN từ trang kết quả (không dùng list search) ──────────
+      // Thêm 4s chờ DIIN sinh số ấn chỉ
+      await page.waitForTimeout(4000);
+
+      const fromResultPage = await this.extractResultFromCurrentPage(policyId);
+      if (fromResultPage) {
+        return fromResultPage;
+      }
+
+      // Fallback: tìm trong danh sách
+      console.log(`[DIIN:${this.jobId}] Không đọc được GCN từ trang kết quả → tìm trong danh sách...`);
+      return await this.collectByPlate(policy, submissionTime, policyId);
+    } finally {
+      release();
+    }
+  }
+
+  /**
+   * Đọc GCN trực tiếp từ trang detail sau khi submit thành công.
+   * Cách tiếp cận này tránh hoàn toàn việc tìm nhầm GCN khi nhiều tab cùng chạy.
+   */
+  private async extractResultFromCurrentPage(policyId?: string): Promise<IssuedPolicyResult | null> {
+    const page = this.page;
+    try {
+      // Tìm số ấn chỉ (GCN) trên trang hiện tại
+      // DIIN thường hiển thị trong text hoặc trong table detail
+      const pageText = await page.locator("body").innerText().catch(() => "");
+
+      // Pattern số ấn chỉ: D26-26-123456-1 hoặc 26-26-12345678-1
+      const gcnMatch = pageText.match(/D?\d{2}-\d{2}-\d{5,8}-\d+/i);
+      if (!gcnMatch) return null;
+
+      const certificateNumber = gcnMatch[0];
+
+      // Tìm phí bảo hiểm từ trang
+      const premiumMatch = pageText.match(/[\d]{1,3}(?:\.[\d]{3})+/g);
+      let premium: number | undefined;
+      if (premiumMatch) {
+        const amounts = premiumMatch.map(s => parseInt(s.replace(/\./g, ""), 10)).filter(n => n > 10000);
+        if (amounts.length > 0) {
+          premium = Math.max(...amounts); // Lấy số lớn nhất (thường là tổng phí)
         }
       }
 
-      if (!errorText) {
-        const errorNodes = page.locator(".alert, .error, [class*='alert-'], [class*='error-']");
-        if (await errorNodes.count() > 0) {
-          const texts = await errorNodes.allInnerTexts();
-          errorText = texts.map(t => t.trim()).filter(Boolean).join("; ");
-        }
+      // Tìm link GCN PDF
+      const gcnLink = page.getByText(diinSelectors.buttons.certificate).first();
+      let pdfUrl: string | undefined;
+      if (await gcnLink.count()) {
+        const onclick = await gcnLink.getAttribute("onclick");
+        const match = onclick?.match(/window\.open\(['\"](.*?)['"]\)/);
+        pdfUrl = match ? match[1] : undefined;
       }
 
-      if (!errorText) {
-        errorText = "Không thể lưu đơn hàng. Có lỗi xảy ra hoặc thiếu thông tin bắt buộc trên cổng DIIN.";
+      // Dựng URL PDF từ VNG Cloud nếu chưa có
+      if (!pdfUrl && /D?\d{2}-\d{2}-\d{6}-\d+/i.test(certificateNumber)) {
+        pdfUrl = this.buildVngPdfUrl(certificateNumber);
       }
 
-      throw new AppError(502, `Cổng DIIN báo lỗi: ${errorText}`, "DIIN_VALIDATION_FAILED");
+      const result: IssuedPolicyResult = { plateNumber: "", customerName: "", certificateNumber, premium, pdfUrl };
+
+      return result;
+    } catch (err) {
+      console.warn(`[DIIN:${this.jobId}] extractResultFromCurrentPage lỗi:`, err);
+      return null;
     }
-    
-    return this.collectByPlate(policy.plateNumber, policy.customerName, submissionTime, policyId);
   }
 
-  async issueExcel(filePath: string): Promise<IssuedPolicyResult[]> {
-    this.assertIssueAllowed();
-    const page = this.activePage;
-    await page.goto(`${env.DIIN_BASE_URL}${diinSelectors.links.insuranceMasterCreate}`, { waitUntil: "networkidle" });
-    const business = page.locator("#Type");
-    if (await business.count()) {
-      const option = business.locator("option", { hasText: /TNDS BB xe OTO/i }).first();
-      const value = await option.getAttribute("value").catch(() => null);
-      if (value) await business.selectOption(value);
-    }
-    await page.locator("#ReportFile").setInputFiles(path.resolve(filePath));
-    await page.locator("#btn-submit").click();
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(3000); // Chờ 3s theo yêu cầu
-    
-    // Bấm Tính phí ở thanh công cụ bên trái (dùng .w-100 để không kích hoạt nhầm dòng trong bảng)
-    const calcBtn = page.locator("button.w-100.ui-button", { hasText: "Tính phí" }).first();
-    await calcBtn.click();
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(3000); // Chờ 3s theo yêu cầu
-    
-    // Bấm Phát hành ở thanh công cụ bên trái (dùng .w-100 để không kích hoạt nhầm dòng trong bảng)
-    const issueBtn = page.locator("button.w-100.ui-button", { hasText: "Phát hành" }).first();
-    await issueBtn.click();
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(3000); // Chờ 3s sau khi click Phát hành
-
-    // Đọc các biển số và tên khách hàng từ file Excel để đối chiếu
-    const workbook = XLSX.readFile(path.resolve(filePath), { cellDates: true });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: "" });
-    
-    const headers = (rows[0] as unknown[]).map(h => String(h || "").trim().toUpperCase().replace(/\s+/g, " "));
-    const plateIdx = headers.indexOf("BIỂN SỐ");
-    const nameIdx = headers.indexOf("HỌ TÊN CHỦ XE");
-    
-    const targets: { plateNumber: string; customerName: string }[] = [];
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
-      if (!row || !row.some(c => String(c ?? "").trim() !== "")) continue;
-      const plate = String(row[plateIdx] || "").trim();
-      const name = String(row[nameIdx] || "").trim();
-      if (plate) {
-        targets.push({ plateNumber: plate, customerName: name });
-      }
-    }
-
-    const submissionTime = new Date();
-    const results: IssuedPolicyResult[] = [];
-    for (const target of targets) {
-      const res = await this.collectByPlate(target.plateNumber, target.customerName, submissionTime);
-      results.push(res);
-    }
-    return results;
-  }
-
+  /**
+   * Tìm GCN trong danh sách DIIN — chỉ dùng làm fallback.
+   *
+   * Cải tiến so với phiên bản cũ:
+   * - Phân biệt chính xác khi nhiều người phát hành trùng biển số song song
+   * - Khớp cả Biển số / Số khung / Số máy + Tên khách hàng (không dấu, viết liền)
+   * - Window thời gian thu hẹp còn 30 giây (thay vì 90s)
+   */
   private async collectByPlate(
-    plateNumber: string,
-    fallbackName: string,
+    policy: SinglePolicyRecord,
     submissionTime: Date,
     policyId?: string
   ): Promise<IssuedPolicyResult> {
-    const page = this.activePage;
+    const page = this.page;
+    const plateNumber = policy.plateNumber;
+    const fallbackName = policy.customerName;
+
     let certificateNumber: string | undefined;
     let premium: number | undefined;
-    let cells: string[] = [];
     let matchedRow: Locator | undefined;
+    let cells: string[] = [];
 
-    const targetKey = plateNumber.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const cleanNum = (str: string | null | undefined) => {
+      if (!str) return "";
+      return str.toUpperCase().replace(/[^A-Z0-9]/g, "").trim();
+    };
 
-    // Thử 2 lần (Lần 1: sau 5s submit, Lần 2: sau khi đợi thêm 2s)
-    const maxAttempts = 2;
+    const cleanName = (str: string | null | undefined) => {
+      if (!str) return "";
+      return str
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/đ/g, "d")
+        .replace(/Đ/g, "D")
+        .toUpperCase()
+        .replace(/[^A-Z]/g, "")
+        .trim();
+    };
+
+    const targetPlate = cleanNum(plateNumber);
+    const hasPlate = targetPlate && targetPlate !== "0";
+
+    const maxAttempts = 3;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      await page.goto(`${env.DIIN_BASE_URL}${diinSelectors.links.issuedCars}`, { waitUntil: "networkidle" });
-       const search = page.locator("#search");
+      await page.goto(`${env.DIIN_BASE_URL}${diinSelectors.links.issuedCars}`, { waitUntil: "domcontentloaded" });
+
+      const search = page.locator("#search");
       if (await search.count()) {
-        const queryTerm = plateNumber === "0" ? fallbackName : plateNumber;
+        const queryTerm = (!plateNumber || plateNumber === "0") ? fallbackName : plateNumber;
         await search.fill(queryTerm);
         await search.press("Enter");
-        await page.waitForTimeout(1500);
+        await page.waitForTimeout(2000);
       }
-      
-      // Đợi lưới dữ liệu tải xong ít nhất 1 dòng
+
       await page.locator("tr.jqgrow").first().waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
 
       const rows = page.locator("tr.jqgrow");
       const count = await rows.count();
+
       for (let i = 0; i < count; i++) {
         const r = rows.nth(i);
         const rowCells = (await r.locator("td").allInnerTexts()).map(x => x.trim());
-        const hasPlate = plateNumber === "0" ? true : rowCells.some(cell => {
-          const cellKey = cell.toUpperCase().replace(/[^A-Z0-9]/g, "");
-          return cellKey === targetKey;
-        });
+
+        // 1. Kiểm tra khớp biển số hoặc số khung/máy
+        let isVehicleMatch = false;
         if (hasPlate) {
-          // Lấy cell ngày tạo (Tạo lúc) và parse ngày để so sánh
-          const dateCell = rowCells.find(x => /\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}/.test(x));
-          if (dateCell) {
-            const diinDate = this.parseDiinDate(dateCell);
-            if (diinDate) {
-              const diffMsRaw = Math.abs(diinDate.getTime() - submissionTime.getTime());
-              const diffMs = diffMsRaw % (12 * 60 * 60 * 1000);
-              const closestDiffMs = Math.min(diffMs, 12 * 60 * 60 * 1000 - diffMs);
-              if (closestDiffMs <= 90000 && diffMsRaw <= 13 * 60 * 60 * 1000) {
-                matchedRow = r;
-                cells = rowCells;
-                break;
-              }
-            }
-          } else {
-            // Fallback nếu không có ngày tạo
-            matchedRow = r;
-            cells = rowCells;
-            break;
+          isVehicleMatch = rowCells.some(cell => cleanNum(cell) === targetPlate);
+        } else {
+          const targetChassis = cleanNum(policy.chassisNumber);
+          const targetEngine = cleanNum(policy.engineNumber);
+          isVehicleMatch = rowCells.some(cell => {
+            const cellClean = cleanNum(cell);
+            return (targetChassis && cellClean === targetChassis) || (targetEngine && cellClean === targetEngine);
+          });
+        }
+
+        if (!isVehicleMatch) continue;
+
+        // 2. Kiểm tra khớp tên khách hàng
+        const targetName = cleanName(fallbackName);
+        const isNameMatch = rowCells.some(cell => {
+          const cellClean = cleanName(cell);
+          return cellClean.includes(targetName) || targetName.includes(cellClean);
+        });
+
+        if (!isNameMatch) continue;
+
+        // 3. Khớp thời gian: trong vòng 30 giây kể từ lúc submit
+        const dateCell = rowCells.find(x => /\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}/.test(x));
+        if (dateCell) {
+          const diinDate = this.parseDiinDate(dateCell);
+          if (diinDate) {
+            const diffMs = Math.abs(diinDate.getTime() - submissionTime.getTime());
+            if (diffMs > 30000) continue; // Ngoài cửa sổ 30 giây → bỏ qua
           }
         }
+
+        matchedRow = r;
+        cells = rowCells;
+        break;
       }
 
       if (matchedRow) {
-        // Cột Số Ấn Chỉ (PaperCertificateNo) khớp theo định dạng số Ấn Chỉ mới (5 đến 8 số cuối)
-        certificateNumber = cells.find((x) => /D?\d{2}-\d{2}-\d{5,8}-\d+/i.test(x));
+        certificateNumber = cells.find(x => /D?\d{2}-\d{2}-\d{5,8}-\d+/i.test(x));
         if (certificateNumber) {
-          premium = this.parseMoney(cells[15]) || this.parseMoney(cells.find((x) => /^\d{1,3}(\.\d{3})+$/.test(x)));
+          premium = this.parseMoney(cells[15]) || this.parseMoney(cells.find(x => /^\d{1,3}(\.\d{3})+$/.test(x)));
           break;
         } else {
           matchedRow = undefined;
@@ -337,81 +392,73 @@ export class DiinService {
       }
 
       if (attempt < maxAttempts - 1) {
-        console.log(`Chờ sinh số Ấn chỉ cho ${plateNumber}, thử lại lần thứ ${attempt + 2} sau 2 giây...`);
-        await page.waitForTimeout(2000); // Đợi 2s trước khi thử lần tiếp theo
+        console.log(`[DIIN:${this.jobId}] Thử lại lần ${attempt + 2}/${maxAttempts} sau 3 giây...`);
+        await page.waitForTimeout(3000);
       }
     }
 
     if (!matchedRow) {
-      throw new AppError(502, `Không tìm thấy đơn vừa phát hành: ${plateNumber}`, "DIIN_RESULT_NOT_FOUND");
+      console.warn(`[DIIN:${this.jobId}] Không tìm thấy GCN trong danh sách cho: ${plateNumber}. ` +
+        `Đơn đã phát hành thành công trên DIIN nhưng chưa thu thập được số GCN.`);
+      return { plateNumber, customerName: fallbackName };
     }
 
-    const result: IssuedPolicyResult = {
-      plateNumber,
-      customerName: fallbackName,
-      certificateNumber,
-      premium
-    };
-    return { ...result, ...(await this.captureCertificate(matchedRow, certificateNumber ?? plateNumber, policyId)) };
+    const result: IssuedPolicyResult = { plateNumber, customerName: fallbackName, certificateNumber, premium };
+    const certCapture = await this.captureCertificate(matchedRow, certificateNumber ?? plateNumber, policyId);
+    return { ...result, ...certCapture };
   }
 
-  private async captureCertificate(row: Locator, fileStem: string, policyId?: string) {
+  private async extractPageErrors(): Promise<string> {
+    const page = this.page;
+    const selectors = [
+      ".validation-summary-errors",
+      ".field-validation-error",
+      ".alert-danger",
+      ".error-message",
+      ".swal2-html-container",
+      ".swal2-title",
+      "#error-msg",
+      ".alert",
+      ".error"
+    ];
+    for (const sel of selectors) {
+      const el = page.locator(sel);
+      if (await el.count() > 0) {
+        const texts = await el.allInnerTexts();
+        const text = texts.map(t => t.trim()).filter(Boolean).join("; ");
+        if (text) return text;
+      }
+    }
+    return "Không thể lưu đơn hàng. Có lỗi xảy ra hoặc thiếu thông tin bắt buộc trên cổng DIIN.";
+  }
+
+  private async captureCertificate(row: Locator, fileStem: string, policyId?: string): Promise<Partial<IssuedPolicyResult>> {
     const gcn = row.getByText(diinSelectors.buttons.certificate).first();
     let pdfUrl: string | undefined;
+
     if (await gcn.count()) {
       const onclick = await gcn.getAttribute("onclick");
-      const match = onclick?.match(/window\.open\(['"](.*?)['"]\)/);
+      const match = onclick?.match(/window\.open\(['\"](.*?)['"]\)/);
       pdfUrl = match ? match[1] : undefined;
     }
 
-    // Nếu không lấy được onclick hoặc onclick rỗng, tự dựng link PDF chuẩn từ VNG Cloud
     if (!pdfUrl && fileStem && /D?\d{2}-\d{2}-\d{6}-\d+/i.test(fileStem)) {
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, "0");
-      const day = String(now.getDate()).padStart(2, "0");
-      pdfUrl = `https://hcm03.vstorage.vngcloud.vn/v1/AUTH_7292c955a56f49b890a5d5b28309503c/daily-diin-production/${year}/${month}/${day}/_${fileStem}.pdf`;
+      pdfUrl = this.buildVngPdfUrl(fileStem);
     }
 
-    if (!pdfUrl) return {};
-
-    const safeName = fileStem.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const pdfPath = path.resolve(env.PDF_DIR, `${safeName}.pdf`);
-
-    // Trả pdfUrl ngay lập tức — không block chờ download.
-    // Download PDF về server chạy ngầm (fire-and-forget) để lưu bản backup.
-    (async () => {
-      try {
-        await fs.mkdir(env.PDF_DIR, { recursive: true });
-        let response = await fetch(pdfUrl!);
-        for (let attempt = 0; attempt < 8 && !response.ok; attempt++) {
-          console.log(`[bg] Chờ file PDF sẵn sàng trên VNG Cloud, lần thử ${attempt + 1}...`);
-          await new Promise(r => setTimeout(r, 4000));
-          response = await fetch(pdfUrl!);
-        }
-        if (response.ok) {
-          const arrayBuffer = await response.arrayBuffer();
-          await fs.writeFile(pdfPath, Buffer.from(arrayBuffer));
-          console.log(`[bg] PDF đã lưu: ${pdfPath}`);
-          
-          if (policyId) {
-            await prisma.policy.update({
-              where: { id: policyId },
-              data: { pdfPath }
-            });
-            console.log(`[bg] Đã cập nhật pdfPath trong database cho policy: ${policyId}`);
-          }
-        }
-      } catch (err) {
-        console.error("[bg] Lỗi download PDF:", err);
-      }
-    })();
-
-    // Trả về pdfUrl ngay, pdfPath sẽ được cập nhật bởi background job
-    return { pdfUrl };
+    return { pdfUrl: pdfUrl ?? undefined };
   }
 
-  private formatDate(date: Date) {
+  /** Dựng URL PDF chuẩn từ VNG Cloud */
+  private buildVngPdfUrl(fileStem: string): string {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `https://hcm03.vstorage.vngcloud.vn/v1/AUTH_7292c955a56f49b890a5d5b28309503c/daily-diin-production/${year}/${month}/${day}/_${fileStem}.pdf`;
+  }
+
+  private formatDate(date: Date): string {
     const vnTime = new Date(date.getTime() + 7 * 60 * 60 * 1000);
     const day = String(vnTime.getUTCDate()).padStart(2, "0");
     const month = String(vnTime.getUTCMonth() + 1).padStart(2, "0");
@@ -421,29 +468,20 @@ export class DiinService {
     return `${day}/${month}/${year} ${hours}:${minutes}`;
   }
 
-  private parseMoney(value?: string) { return value ? Number(value.replace(/\./g, "").replace(/,/g, ".")) : undefined; }
+  private parseMoney(value?: string): number | undefined {
+    return value ? Number(value.replace(/\./g, "").replace(/,/g, ".")) || undefined : undefined;
+  }
 
   private parseDiinDate(dateStr: string): Date | null {
     const cleanStr = dateStr.toUpperCase().replace(/\s+/g, " ");
     const match = cleanStr.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?(?:\s+(SÁNG|CHIỀU|AM|PM))?/);
     if (!match) return null;
-    const [_, day, month, year, hour, minute, second, period] = match;
+    const [, day, month, year, hour, minute, second, period] = match;
     let h = parseInt(hour, 10);
-    if (period) {
-      if ((period === "CHIỀU" || period === "PM") && h < 12) {
-        h += 12;
-      } else if ((period === "SÁNG" || period === "AM") && h === 12) {
-        h = 0;
-      }
-    }
-    const utcMs = Date.UTC(
-      parseInt(year, 10),
-      parseInt(month, 10) - 1,
-      parseInt(day, 10),
-      h,
-      parseInt(minute, 10),
-      second ? parseInt(second, 10) : 0
-    );
+    if (period === "CHIỀU" || period === "PM") { if (h < 12) h += 12; }
+    else if (period === "SÁNG" || period === "AM") { if (h === 12) h = 0; }
+    // Giờ DIIN là UTC+7, convert sang UTC
+    const utcMs = Date.UTC(parseInt(year), parseInt(month) - 1, parseInt(day), h, parseInt(minute), second ? parseInt(second) : 0);
     return new Date(utcMs - 7 * 60 * 60 * 1000);
   }
 }

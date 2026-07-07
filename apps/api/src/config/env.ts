@@ -22,6 +22,8 @@ export const env = z.object({
   DIIN_ALLOW_ISSUE: bool,
   DIIN_TIMEOUT_MS: z.coerce.number().default(45000),
   DIIN_QUEUE_MODE: z.enum(["bullmq", "sync"]).default("bullmq"),
+  DIIN_RECORD_VIDEO: bool,
+  DIIN_WORKER_CONCURRENCY: z.coerce.number().default(40),
   UPLOAD_DIR: z.string().default("./uploads"),
   PDF_DIR: z.string().default("./downloads"),
   MAX_UPLOAD_MB: z.coerce.number().default(20),
