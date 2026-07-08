@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { Locator, Page } from "playwright";
 import { env } from "../config/env.js";
 import { AppError } from "../lib/errors.js";
@@ -212,70 +214,14 @@ export class DiinService {
         throw new AppError(502, `Cổng DIIN báo lỗi: ${errorText}`, "DIIN_VALIDATION_FAILED");
       }
 
-      // ── Đọc GCN từ trang kết quả (không dùng list search) ──────────
+      // ── Đọc GCN từ danh sách sau khi submit ─────────────────────────
       // Thêm 4s chờ DIIN sinh số ấn chỉ
       await page.waitForTimeout(4000);
 
-      const fromResultPage = await this.extractResultFromCurrentPage(policyId);
-      if (fromResultPage) {
-        return fromResultPage;
-      }
-
-      // Fallback: tìm trong danh sách
-      console.log(`[DIIN:${this.jobId}] Không đọc được GCN từ trang kết quả → tìm trong danh sách...`);
+      console.log(`[DIIN:${this.jobId}] Đang quét GCN từ danh sách...`);
       return await this.collectByPlate(policy, submissionTime, policyId);
     } finally {
       release();
-    }
-  }
-
-  /**
-   * Đọc GCN trực tiếp từ trang detail sau khi submit thành công.
-   * Cách tiếp cận này tránh hoàn toàn việc tìm nhầm GCN khi nhiều tab cùng chạy.
-   */
-  private async extractResultFromCurrentPage(policyId?: string): Promise<IssuedPolicyResult | null> {
-    const page = this.page;
-    try {
-      // Tìm số ấn chỉ (GCN) trên trang hiện tại
-      // DIIN thường hiển thị trong text hoặc trong table detail
-      const pageText = await page.locator("body").innerText().catch(() => "");
-
-      // Pattern số ấn chỉ: D26-26-123456-1 hoặc 26-26-12345678-1
-      const gcnMatch = pageText.match(/D?\d{2}-\d{2}-\d{5,8}-\d+/i);
-      if (!gcnMatch) return null;
-
-      const certificateNumber = gcnMatch[0];
-
-      // Tìm phí bảo hiểm từ trang
-      const premiumMatch = pageText.match(/[\d]{1,3}(?:\.[\d]{3})+/g);
-      let premium: number | undefined;
-      if (premiumMatch) {
-        const amounts = premiumMatch.map(s => parseInt(s.replace(/\./g, ""), 10)).filter(n => n > 10000);
-        if (amounts.length > 0) {
-          premium = Math.max(...amounts); // Lấy số lớn nhất (thường là tổng phí)
-        }
-      }
-
-      // Tìm link GCN PDF
-      const gcnLink = page.getByText(diinSelectors.buttons.certificate).first();
-      let pdfUrl: string | undefined;
-      if (await gcnLink.count()) {
-        const onclick = await gcnLink.getAttribute("onclick");
-        const match = onclick?.match(/window\.open\(['\"](.*?)['"]\)/);
-        pdfUrl = match ? match[1] : undefined;
-      }
-
-      // Dựng URL PDF từ VNG Cloud nếu chưa có
-      if (!pdfUrl && /D?\d{2}-\d{2}-\d{6}-\d+/i.test(certificateNumber)) {
-        pdfUrl = this.buildVngPdfUrl(certificateNumber);
-      }
-
-      const result: IssuedPolicyResult = { plateNumber: "", customerName: "", certificateNumber, premium, pdfUrl };
-
-      return result;
-    } catch (err) {
-      console.warn(`[DIIN:${this.jobId}] extractResultFromCurrentPage lỗi:`, err);
-      return null;
     }
   }
 
@@ -384,7 +330,11 @@ export class DiinService {
       if (matchedRow) {
         certificateNumber = cells.find(x => /D?\d{2}-\d{2}-\d{5,8}-\d+/i.test(x));
         if (certificateNumber) {
-          premium = this.parseMoney(cells[15]) || this.parseMoney(cells.find(x => /^\d{1,3}(\.\d{3})+$/.test(x)));
+          // cells[13] là Tổng Phí. Ta cũng lọc tất cả các cột số để lấy số lớn nhất làm dự phòng (fallback)
+          const parsedAmounts = cells
+            .map(c => this.parseMoney(c))
+            .filter((n): n is number => n !== undefined && n >= 10000);
+          premium = this.parseMoney(cells[13]) || (parsedAmounts.length > 0 ? Math.max(...parsedAmounts) : undefined);
           break;
         } else {
           matchedRow = undefined;
@@ -446,7 +396,10 @@ export class DiinService {
       pdfUrl = this.buildVngPdfUrl(fileStem);
     }
 
-    return { pdfUrl: pdfUrl ?? undefined };
+    if (!pdfUrl) return {};
+
+    this.downloadPdfInBackground(pdfUrl, fileStem, policyId);
+    return { pdfUrl };
   }
 
   /** Dựng URL PDF chuẩn từ VNG Cloud */
@@ -456,6 +409,57 @@ export class DiinService {
     const month = String(now.getMonth() + 1).padStart(2, "0");
     const day = String(now.getDate()).padStart(2, "0");
     return `https://hcm03.vstorage.vngcloud.vn/v1/AUTH_7292c955a56f49b890a5d5b28309503c/daily-diin-production/${year}/${month}/${day}/_${fileStem}.pdf`;
+  }
+
+  /** Download PDF về server trong background (không block luồng chính) */
+  private downloadPdfInBackground(pdfUrl: string, fileStem: string, policyId?: string): void {
+    const safeName = fileStem.replace(/[^a-zA-Z0-9._-]/g, "_");
+    // Dùng policyId làm prefix để tránh ghi đè khi cùng biển số
+    const filename = policyId ? `${policyId.slice(0, 8)}_${safeName}.pdf` : `${safeName}.pdf`;
+    const pdfPath = path.resolve(env.PDF_DIR, filename);
+
+    (async () => {
+      try {
+        await fs.mkdir(env.PDF_DIR, { recursive: true });
+        let response = await fetch(pdfUrl);
+        for (let attempt = 0; attempt < 8 && !response.ok; attempt++) {
+          console.log(`[bg] Chờ PDF sẵn sàng trên VNG Cloud, lần ${attempt + 1}/8...`);
+          await new Promise(r => setTimeout(r, 4000));
+          response = await fetch(pdfUrl);
+        }
+        if (!response.ok) {
+          console.error(`[bg] PDF không khả dụng sau 8 lần thử: ${pdfUrl}`);
+          return;
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        // Kiểm tra magic bytes — phải là PDF thật
+        const magic = buffer.slice(0, 4).toString("ascii");
+        if (magic !== "%PDF") {
+          console.error(`[bg] File tải về không phải PDF (magic: ${magic}) — bỏ qua`);
+          return;
+        }
+        if (buffer.length < 1024) {
+          console.error(`[bg] File PDF quá nhỏ (${buffer.length} bytes) — bỏ qua`);
+          return;
+        }
+
+        await fs.writeFile(pdfPath, buffer);
+        console.log(`[bg] PDF đã lưu: ${pdfPath}`);
+
+        if (policyId) {
+          await prisma.policy.update({
+            where: { id: policyId },
+            data: { pdfPath }
+          });
+          console.log(`[bg] Đã cập nhật pdfPath cho policy: ${policyId}`);
+        }
+      } catch (err) {
+        console.error("[bg] Lỗi download PDF:", err);
+      }
+    })();
   }
 
   private formatDate(date: Date): string {

@@ -356,6 +356,17 @@ policyRouter.get("/:id/pdf", asyncHandler(async (req, res) => {
   const id = String(req.params.id);
   const policy = assertFound(await prisma.policy.findUnique({ where: { id } }));
   if (req.user!.role === UserRole.CTV && policy.userId !== req.user!.id) throw new AppError(403, "Bạn không có quyền tải GCN");
+  
+  if (policy.pdfPath) {
+    const absolutePath = path.resolve(policy.pdfPath);
+    if (fs.existsSync(absolutePath)) {
+      const cleanName = policy.plateNumber
+        ? policy.plateNumber.toUpperCase().replace(/[^A-Z0-9\s]/g, "").replace(/\s+/g, " ").trim()
+        : "GCN";
+      return res.download(absolutePath, `${cleanName || "GCN"}.pdf`);
+    }
+  }
+
   if (!policy.pdfUrl) throw new AppError(404, "GCN PDF chưa sẵn sàng");
   res.redirect(policy.pdfUrl);
 }));
