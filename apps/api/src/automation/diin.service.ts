@@ -285,8 +285,8 @@ export class DiinService {
       const headers = await page.locator("tr.ui-jqgrid-labels th, thead tr th, th").allInnerTexts()
         .then(list => list.map(x => x.trim()))
         .catch(() => [] as string[]);
-      const tongPhiIndex = headers.findIndex(h => h.includes("Tổng phí") || h.includes("Tổng Phí") || h.includes("Phí"));
-      const soAnChiIndex = headers.findIndex(h => h.includes("Số Ấn Chi") || h.includes("Số Ấn Chỉ") || h.includes("Ấn chỉ"));
+      const tongPhiIndex = headers.findIndex(h => h === "Tổng phí" || h === "Tổng Phí" || h === "Tổng cộng" || h.includes("Tổng phí") || h.includes("Tổng Phí"));
+      const soAnChiIndex = headers.findIndex(h => h.includes("Số Ấn Chi") || h.includes("Số Ấn Chỉ") || h.includes("Ấn chỉ") || h.includes("Ấn Chỉ"));
 
       const rows = page.locator("tr.jqgrow");
       const count = await rows.count();
