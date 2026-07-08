@@ -281,6 +281,13 @@ export class DiinService {
 
       await page.locator("tr.jqgrow").first().waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
 
+      // Quét tiêu đề cột để xác định đúng chỉ số cột của Số Ấn Chỉ và Tổng Phí
+      const headers = await page.locator("tr.ui-jqgrid-labels th, thead tr th, th").allInnerTexts()
+        .then(list => list.map(x => x.trim()))
+        .catch(() => [] as string[]);
+      const tongPhiIndex = headers.findIndex(h => h.includes("Tổng phí") || h.includes("Tổng Phí") || h.includes("Phí"));
+      const soAnChiIndex = headers.findIndex(h => h.includes("Số Ấn Chi") || h.includes("Số Ấn Chỉ") || h.includes("Ấn chỉ"));
+
       const rows = page.locator("tr.jqgrow");
       const count = await rows.count();
 
@@ -328,13 +335,36 @@ export class DiinService {
       }
 
       if (matchedRow) {
-        certificateNumber = cells.find(x => /D?\d{2}-\d{2}-\d{5,8}-\d+/i.test(x));
-        if (certificateNumber) {
-          // cells[13] là Tổng Phí. Ta cũng lọc tất cả các cột số để lấy số lớn nhất làm dự phòng (fallback)
-          const parsedAmounts = cells
-            .map(c => this.parseMoney(c))
-            .filter((n): n is number => n !== undefined && n >= 10000);
-          premium = this.parseMoney(cells[13]) || (parsedAmounts.length > 0 ? Math.max(...parsedAmounts) : undefined);
+        const finalSoAnChiIndex = soAnChiIndex !== -1 ? soAnChiIndex : 15;
+        const finalTongPhiIndex = tongPhiIndex !== -1 ? tongPhiIndex : 13;
+
+        console.log(`[DIIN:${this.jobId}] Chỉ số cột tìm thấy: Tổng phí = ${tongPhiIndex} (dùng ${finalTongPhiIndex}), GCN = ${soAnChiIndex} (dùng ${finalSoAnChiIndex})`);
+
+        let rawCert = cells[finalSoAnChiIndex] && /D?\d{2}-\d{2}-\d{5,8}-\d+/i.test(cells[finalSoAnChiIndex])
+          ? cells[finalSoAnChiIndex]
+          : cells.find(x => /D?\d{2}-\d{2}-\d{5,8}-\d+/i.test(x));
+
+        if (rawCert) {
+          // Làm sạch số GCN nếu bị lẫn đường dẫn file (ví dụ: 2026/07/08/_D26-80-030101-260413489.pdf)
+          const cleanCert = rawCert.split('/').pop()?.split('\\').pop() || rawCert;
+          certificateNumber = cleanCert.replace(/^_/, "").replace(/\.pdf$/i, "").trim();
+
+          console.log(`[DIIN:${this.jobId}] Số GCN thô: "${rawCert}" -> Làm sạch: "${certificateNumber}"`);
+
+          // Đọc Tổng Phí từ cột tìm thấy
+          premium = this.parseMoney(cells[finalTongPhiIndex]);
+          console.log(`[DIIN:${this.jobId}] Đọc phí từ cột ${finalTongPhiIndex}: "${cells[finalTongPhiIndex]}" -> ${premium}`);
+
+          // Fallback: nếu cột không parse được số hợp lệ >= 10.000, tìm số lớn nhất trong toàn bộ hàng (tránh lấy nhầm thuế VAT)
+          if (!premium || premium < 10000) {
+            const parsedAmounts = cells
+              .map(c => this.parseMoney(c))
+              .filter((n): n is number => n !== undefined && n >= 10000);
+            if (parsedAmounts.length > 0) {
+              premium = Math.max(...parsedAmounts);
+              console.log(`[DIIN:${this.jobId}] Fallback phí (lấy số lớn nhất >= 10k): ${premium}`);
+            }
+          }
           break;
         } else {
           matchedRow = undefined;
