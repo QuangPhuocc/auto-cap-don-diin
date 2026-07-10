@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { UserRole } from "@prisma/client";
+import fs from "node:fs";
+import path from "node:path";
 import { asyncHandler } from "../../lib/async-handler.js";
 import { AppError, assertFound } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
@@ -17,4 +19,18 @@ jobRouter.get("/:id", asyncHandler(async (req, res) => {
   const job = assertFound(await prisma.job.findUnique({ where: { id }, include: { batch: true, policies: true } }));
   if (req.user!.role === UserRole.CTV && job.userId !== req.user!.id) throw new AppError(403, "Bạn không có quyền xem job này");
   res.json(job);
+}));
+
+jobRouter.get("/:id/screenshot", asyncHandler(async (req, res) => {
+  const id = String(req.params.id);
+  const job = assertFound(await prisma.job.findUnique({ where: { id } }));
+  if (req.user!.role === UserRole.CTV && job.userId !== req.user!.id) {
+    throw new AppError(403, "Bạn không có quyền xem screenshot của job này");
+  }
+  const screenshotPath = path.resolve(`./debug/screenshot-error-${id}.png`);
+  if (fs.existsSync(screenshotPath)) {
+    res.sendFile(screenshotPath);
+  } else {
+    throw new AppError(404, "Không tìm thấy file ảnh chụp màn hình debug.");
+  }
 }));

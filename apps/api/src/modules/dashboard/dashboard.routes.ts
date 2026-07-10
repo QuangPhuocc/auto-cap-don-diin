@@ -40,7 +40,13 @@ dashboardRouter.get("/stats", asyncHandler(async (req, res) => {
   let activeUsers: number | undefined = undefined;
 
   if (req.user!.role === UserRole.CTV) {
-    policyWhere = { userId: req.user!.id, ...dateFilter };
+    policyWhere = {
+      ...dateFilter,
+      OR: [
+        { userId: req.user!.id },
+        { revenueUserId: req.user!.id }
+      ]
+    };
     jobWhere = { userId: req.user!.id, ...dateFilter };
   } else if (req.user!.role === UserRole.MANAGER) {
     const ctvUsers = await prisma.user.findMany({
@@ -48,7 +54,13 @@ dashboardRouter.get("/stats", asyncHandler(async (req, res) => {
       select: { id: true }
     });
     const allowedUserIds = [req.user!.id, ...ctvUsers.map(u => u.id)];
-    policyWhere = { userId: { in: allowedUserIds }, ...dateFilter };
+    policyWhere = {
+      ...dateFilter,
+      OR: [
+        { userId: { in: allowedUserIds } },
+        { revenueUserId: { in: allowedUserIds } }
+      ]
+    };
     jobWhere = { userId: { in: allowedUserIds }, ...dateFilter };
     activeUsers = await prisma.user.count({
       where: { creatorId: req.user!.id, status: "ACTIVE" }

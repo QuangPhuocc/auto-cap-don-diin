@@ -12,12 +12,16 @@ const statusStyle: Record<string, string> = {
   FAILED: "bg-red-100 text-red-700",
   PROCESSING: "bg-blue-100 text-blue-700",
   QUEUED: "bg-amber-100 text-amber-700",
+  VERIFY_FAILED: "bg-rose-100 text-rose-700 border border-rose-200",
+  NEED_MANUAL_REVIEW: "bg-indigo-100 text-indigo-700 border border-indigo-200",
 };
 const statusText: Record<string, string> = {
   ISSUED: "Đã phát hành",
   FAILED: "Thất bại",
   PROCESSING: "Đang lấy link GCN...",
   QUEUED: "Đang xếp hàng...",
+  VERIFY_FAILED: "Lỗi đối soát",
+  NEED_MANUAL_REVIEW: "Cần kiểm tra lại",
 };
 
 /** Đồng hồ đếm ngược — hiển thị số giây còn lại tối đa để hoàn thành */
@@ -154,6 +158,8 @@ export function PoliciesPage() {
             <option value="PROCESSING">Đang xử lý</option>
             <option value="ISSUED">Đã phát hành</option>
             <option value="FAILED">Thất bại</option>
+            <option value="VERIFY_FAILED">Lỗi đối soát</option>
+            <option value="NEED_MANUAL_REVIEW">Cần kiểm tra lại</option>
           </Select>
           <Select
             value={selectedMonth ? `${selectedMonth}-${selectedYear}` : ""}
@@ -202,7 +208,9 @@ export function PoliciesPage() {
                   <td className="p-3">
                     <div className="font-medium">{p.customerName}</div>
                     {user?.role !== "CTV" && p.user && (
-                      <div className="text-xs text-muted-foreground">{p.user.fullName}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {p.user.fullName} {p.issuerName && p.issuerName.toUpperCase() !== (p.user.fullName || "").toUpperCase() && `(cho ${p.issuerName})`}
+                      </div>
                     )}
                   </td>
                   <td className="p-3">

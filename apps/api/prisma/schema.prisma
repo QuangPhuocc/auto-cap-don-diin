@@ -24,6 +24,8 @@ enum PolicyStatus {
   PROCESSING
   ISSUED
   FAILED
+  VERIFY_FAILED
+  NEED_MANUAL_REVIEW
 }
 
 enum JobType {
@@ -36,6 +38,8 @@ enum JobStatus {
   PROCESSING
   COMPLETED
   FAILED
+  VERIFY_FAILED
+  NEED_MANUAL_REVIEW
 }
 
 enum BatchStatus {
@@ -59,7 +63,8 @@ model User {
   creatorId    String?     @map("creator_id")
   creator      User?       @relation("UserCreator", fields: [creatorId], references: [id])
   createdUsers User[]      @relation("UserCreator")
-  policies     Policy[]
+  policies     Policy[]    @relation("CreatedPolicies")
+  revenuePolicies Policy[] @relation("RevenuePolicies")
   jobs         Job[]
   auditLogs    AuditLog[]
   batches      BatchUpload[]
@@ -98,7 +103,9 @@ model Policy {
   issuedAt           DateTime?    @map("issued_at")
   createdAt          DateTime     @default(now()) @map("created_at")
   updatedAt          DateTime     @updatedAt @map("updated_at")
-  user               User         @relation(fields: [userId], references: [id])
+  revenueUserId      String?      @map("revenue_user_id")
+  user               User         @relation("CreatedPolicies", fields: [userId], references: [id])
+  revenueUser        User?        @relation("RevenuePolicies", fields: [revenueUserId], references: [id])
   batch              BatchUpload? @relation(fields: [batchId], references: [id])
   job                Job?         @relation(fields: [jobId], references: [id])
 

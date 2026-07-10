@@ -7,6 +7,7 @@ import { prisma } from "../lib/prisma.js";
 import { diinPool, submitMutex } from "./diin.pool.js";
 import { diinSelectors } from "./diin.selectors.js";
 import type { IssuedPolicyResult, SinglePolicyRecord } from "./diin.types.js";
+import { calculateExpectedPremium } from "../lib/premium-calculator.js";
 
 /**
  * DiinService — Xử lý 1 job phát hành trên 1 tab (Page) riêng biệt.
@@ -124,6 +125,11 @@ export class DiinService {
     await page.goto(`${env.DIIN_BASE_URL}${diinSelectors.links.issuedCarsCreate}`, {
       waitUntil: "domcontentloaded"
     });
+    if (await this.ensureSession(page.url())) {
+      await page.goto(`${env.DIIN_BASE_URL}${diinSelectors.links.issuedCarsCreate}`, {
+        waitUntil: "domcontentloaded"
+      });
+    }
     // Đợi form sẵn sàng
     await page.locator("#Fullname").waitFor({ state: "visible", timeout: 20000 });
 
@@ -219,7 +225,7 @@ export class DiinService {
       await page.waitForTimeout(4000);
 
       console.log(`[DIIN:${this.jobId}] Đang quét GCN từ danh sách...`);
-      return await this.collectByPlate(policy, submissionTime, policyId);
+      return await this.collectByPlate(policy, submissionTime, policyId, effDate);
     } finally {
       release();
     }
@@ -236,7 +242,8 @@ export class DiinService {
   private async collectByPlate(
     policy: SinglePolicyRecord,
     submissionTime: Date,
-    policyId?: string
+    policyId?: string,
+    expectedEffDate?: Date
   ): Promise<IssuedPolicyResult> {
     const page = this.page;
     const plateNumber = policy.plateNumber;
@@ -365,6 +372,19 @@ export class DiinService {
               console.log(`[DIIN:${this.jobId}] Fallback phí (lấy số lớn nhất >= 10k): ${premium}`);
             }
           }
+
+          // ── POST-ISSUANCE VERIFICATION ─────────────────────────────
+          // 1. Đối soát ngày hiệu lực
+          const tuNgayIndex = headers.findIndex(h => h.includes("Từ ngày") || h.includes("Ngày bắt đầu") || h.includes("Hiệu lực từ") || h.includes("Từ Ngày"));
+          if (tuNgayIndex !== -1 && cells[tuNgayIndex] && expectedEffDate) {
+            const parsedDate = this.parseDiinDate(cells[tuNgayIndex]);
+            if (parsedDate) {
+              const diffMin = Math.abs(parsedDate.getTime() - expectedEffDate.getTime()) / 60000;
+              if (diffMin > 10) { // Sai lệch quá 10 phút
+                throw new AppError(422, `Sai ngày hiệu lực: expected ${expectedEffDate.toISOString()}, got ${parsedDate.toISOString()}`, "POLICY_VERIFICATION_FAILED");
+              }
+            }
+          }
           break;
         } else {
           matchedRow = undefined;
@@ -422,14 +442,14 @@ export class DiinService {
       pdfUrl = match ? match[1] : undefined;
     }
 
-    if (!pdfUrl && fileStem && /D?\d{2}-\d{2}-\d{6}-\d+/i.test(fileStem)) {
+    if (!pdfUrl && fileStem && /D?\d{2}-\d{2}-\d{5,8}-\d+/i.test(fileStem)) {
       pdfUrl = this.buildVngPdfUrl(fileStem);
     }
 
     if (!pdfUrl) return {};
 
-    this.downloadPdfInBackground(pdfUrl, fileStem, policyId);
-    return { pdfUrl };
+    const pdfPath = await this.downloadPdfSync(pdfUrl, fileStem, policyId);
+    return { pdfUrl, pdfPath };
   }
 
   /** Dựng URL PDF chuẩn từ VNG Cloud */
@@ -441,55 +461,40 @@ export class DiinService {
     return `https://hcm03.vstorage.vngcloud.vn/v1/AUTH_7292c955a56f49b890a5d5b28309503c/daily-diin-production/${year}/${month}/${day}/_${fileStem}.pdf`;
   }
 
-  /** Download PDF về server trong background (không block luồng chính) */
-  private downloadPdfInBackground(pdfUrl: string, fileStem: string, policyId?: string): void {
+  /** Download PDF về server đồng bộ và kiểm tra tính toàn vẹn */
+  private async downloadPdfSync(pdfUrl: string, fileStem: string, policyId?: string): Promise<string> {
     const safeName = fileStem.replace(/[^a-zA-Z0-9._-]/g, "_");
-    // Dùng policyId làm prefix để tránh ghi đè khi cùng biển số
     const filename = policyId ? `${policyId.slice(0, 8)}_${safeName}.pdf` : `${safeName}.pdf`;
     const pdfPath = path.resolve(env.PDF_DIR, filename);
 
-    (async () => {
-      try {
-        await fs.mkdir(env.PDF_DIR, { recursive: true });
-        let response = await fetch(pdfUrl);
-        for (let attempt = 0; attempt < 8 && !response.ok; attempt++) {
-          console.log(`[bg] Chờ PDF sẵn sàng trên VNG Cloud, lần ${attempt + 1}/8...`);
-          await new Promise(r => setTimeout(r, 4000));
-          response = await fetch(pdfUrl);
-        }
-        if (!response.ok) {
-          console.error(`[bg] PDF không khả dụng sau 8 lần thử: ${pdfUrl}`);
-          return;
-        }
+    await fs.mkdir(env.PDF_DIR, { recursive: true });
+    
+    let response = await fetch(pdfUrl);
+    for (let attempt = 0; attempt < 8 && !response.ok; attempt++) {
+      console.log(`[bg] Chờ PDF sẵn sàng trên VNG Cloud, lần ${attempt + 1}/8...`);
+      await new Promise(r => setTimeout(r, 4000));
+      response = await fetch(pdfUrl);
+    }
+    
+    if (!response.ok) {
+      throw new Error(`PDF không khả dụng sau 8 lần thử: ${pdfUrl}`);
+    }
 
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
-        // Kiểm tra magic bytes — phải là PDF thật
-        const magic = buffer.slice(0, 4).toString("ascii");
-        if (magic !== "%PDF") {
-          console.error(`[bg] File tải về không phải PDF (magic: ${magic}) — bỏ qua`);
-          return;
-        }
-        if (buffer.length < 1024) {
-          console.error(`[bg] File PDF quá nhỏ (${buffer.length} bytes) — bỏ qua`);
-          return;
-        }
+    // Kiểm tra magic bytes — phải là PDF thật
+    const magic = buffer.slice(0, 4).toString("ascii");
+    if (magic !== "%PDF") {
+      throw new Error(`File tải về không phải là PDF hợp lệ (magic: ${magic})`);
+    }
+    if (buffer.length < 1024) {
+      throw new Error(`File PDF quá nhỏ hoặc bị hỏng (${buffer.length} bytes)`);
+    }
 
-        await fs.writeFile(pdfPath, buffer);
-        console.log(`[bg] PDF đã lưu: ${pdfPath}`);
-
-        if (policyId) {
-          await prisma.policy.update({
-            where: { id: policyId },
-            data: { pdfPath }
-          });
-          console.log(`[bg] Đã cập nhật pdfPath cho policy: ${policyId}`);
-        }
-      } catch (err) {
-        console.error("[bg] Lỗi download PDF:", err);
-      }
-    })();
+    await fs.writeFile(pdfPath, buffer);
+    console.log(`[bg] PDF đã lưu và xác minh: ${pdfPath}`);
+    return pdfPath;
   }
 
   private formatDate(date: Date): string {

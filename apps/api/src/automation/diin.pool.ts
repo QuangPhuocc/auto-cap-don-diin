@@ -62,7 +62,7 @@ class DiinBrowserPool {
   }
 
   private async ensureInitialized(): Promise<void> {
-    if (this.context) return;
+    if (this.context && this.browser?.isConnected()) return;
     if (this.initPromise) {
       // Đang init → đợi
       return this.initPromise;

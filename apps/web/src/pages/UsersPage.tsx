@@ -4,8 +4,11 @@ import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Input, Label, 
 import { api, download } from "../lib/api";
 import type { User, Policy } from "../lib/types";
 import { dateTime, money } from "../lib/utils";
+import { useAuth } from "../context/AuthContext";
 
 export function UsersPage() {
+  const { user } = useAuth();
+  const isMaster = user?.username === "0869200835";
   const [items, setItems] = useState<User[]>([]);
   const [show, setShow] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -69,12 +72,14 @@ export function UsersPage() {
           <h2 className="text-2xl font-bold">Quản lý tài khoản CTV / Quản lý</h2>
           <p className="text-muted-foreground">Tạo tài khoản, sửa thông tin, khóa hoặc kích hoạt tài khoản hệ thống</p>
         </div>
-        <Button onClick={() => { setShow(!show); setEditingUser(null); }}><Plus size={17}/>Thêm tài khoản</Button>
+        {isMaster && (
+          <Button onClick={() => { setShow(!show); setEditingUser(null); }}><Plus size={17}/>Thêm tài khoản</Button>
+        )}
       </div>
 
       {error && <p className="rounded-lg bg-red-50 p-3 text-red-700">{error}</p>}
 
-      {show && (
+      {isMaster && show && (
         <Card>
           <CardHeader>
             <CardTitle>Tạo tài khoản mới</CardTitle>
@@ -314,12 +319,16 @@ function UserPoliciesList({ user, onBack }: { user: User; onBack: () => void }) 
     FAILED: "bg-red-100 text-red-700",
     PROCESSING: "bg-blue-100 text-blue-700",
     QUEUED: "bg-amber-100 text-amber-700",
+    VERIFY_FAILED: "bg-rose-100 text-rose-700 border border-rose-200",
+    NEED_MANUAL_REVIEW: "bg-indigo-100 text-indigo-700 border border-indigo-200",
   };
   const statusText: Record<string, string> = {
     ISSUED: "Đã phát hành",
     FAILED: "Thất bại",
     PROCESSING: "Đang xử lý",
     QUEUED: "Chờ xử lý",
+    VERIFY_FAILED: "Lỗi đối soát",
+    NEED_MANUAL_REVIEW: "Cần kiểm tra lại",
   };
 
   return (

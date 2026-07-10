@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Router } from "express";
-import { JobType, UserRole, Prisma } from "@prisma/client";
+import { JobType, UserRole, Prisma, PolicyStatus } from "@prisma/client";
 import xlsx from "xlsx";
 import { z } from "zod";
 import { env } from "../../config/env.js";
@@ -18,7 +18,7 @@ const pagination = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100000).default(10000),
   q: z.preprocess((val) => (val === "" ? undefined : val), z.string().optional()),
-  status: z.preprocess((val) => (val === "" ? undefined : val), z.enum(["QUEUED", "PROCESSING", "ISSUED", "FAILED"]).optional())
+  status: z.preprocess((val) => (val === "" ? undefined : val), z.enum(["QUEUED", "PROCESSING", "ISSUED", "FAILED", "VERIFY_FAILED", "NEED_MANUAL_REVIEW"]).optional())
 });
 
 policyRouter.get("/", asyncHandler(async (req, res) => {
@@ -27,7 +27,12 @@ policyRouter.get("/", asyncHandler(async (req, res) => {
   const userIdQuery = req.query.userId ? String(req.query.userId) : undefined;
   let own = {};
   if (req.user!.role === UserRole.CTV) {
-    own = { userId: req.user!.id };
+    own = {
+      OR: [
+        { userId: req.user!.id },
+        { revenueUserId: req.user!.id }
+      ]
+    };
   } else if (req.user!.role === UserRole.MANAGER) {
     const ctvUsers = await prisma.user.findMany({
       where: { creatorId: req.user!.id },
@@ -36,15 +41,30 @@ policyRouter.get("/", asyncHandler(async (req, res) => {
     const allowedUserIds = [req.user!.id, ...ctvUsers.map(u => u.id)];
     if (userIdQuery) {
       if (allowedUserIds.includes(userIdQuery)) {
-        own = { userId: userIdQuery };
+        own = {
+          OR: [
+            { userId: userIdQuery },
+            { revenueUserId: userIdQuery }
+          ]
+        };
       } else {
         own = { userId: { in: [] } };
       }
     } else {
-      own = { userId: { in: allowedUserIds } };
+      own = {
+        OR: [
+          { userId: { in: allowedUserIds } },
+          { revenueUserId: { in: allowedUserIds } }
+        ]
+      };
     }
   } else {
-    own = userIdQuery ? { userId: userIdQuery } : {};
+    own = userIdQuery ? {
+      OR: [
+        { userId: userIdQuery },
+        { revenueUserId: userIdQuery }
+      ]
+    } : {};
   }
   
   const month = req.query.month ? Number(req.query.month) : undefined;
@@ -79,6 +99,37 @@ policyRouter.get("/", asyncHandler(async (req, res) => {
 policyRouter.post("/single", asyncHandler(async (req, res) => {
   const input = singlePolicySchema.parse(req.body);
 
+  // Chống phát hành trùng (Double Submit)
+  const plate = input.plateNumber;
+  const chassis = input.chassisNumber;
+  const engine = input.engineNumber;
+
+  const hasPlate = plate && plate !== "0";
+  const hasChassis = chassis && chassis !== "0";
+  const hasEngine = engine && engine !== "0";
+
+  let duplicateCheck: any = null;
+  if (hasPlate) {
+    duplicateCheck = await prisma.policy.findFirst({
+      where: {
+        plateNumber: plate,
+        status: { in: [PolicyStatus.QUEUED, PolicyStatus.PROCESSING] }
+      }
+    });
+  } else if (hasChassis && hasEngine) {
+    duplicateCheck = await prisma.policy.findFirst({
+      where: {
+        chassisNumber: chassis,
+        engineNumber: engine,
+        status: { in: [PolicyStatus.QUEUED, PolicyStatus.PROCESSING] }
+      }
+    });
+  }
+
+  if (duplicateCheck) {
+    throw new AppError(409, "Đơn hàng cho xe này đang được xử lý trên hệ thống. Vui lòng không gửi trùng lặp.", "DUPLICATE_JOB");
+  }
+
   const specialUsernames = ["0962731468", "0906643381", "0942542249", "0981740680", "0931183389"];
   const specialFullNames = ["LINH", "PHƯỚC", "YÊN", "DIỄM", "NHI"];
   const isSpecial = req.user && (
@@ -94,9 +145,22 @@ policyRouter.post("/single", asyncHandler(async (req, res) => {
     }
   }
 
+  let revenueUserId = req.user!.id;
+  if (input.issuerName) {
+    const allUsers = await prisma.user.findMany();
+    const normalizedIssuer = input.issuerName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toUpperCase().trim();
+    const matchedUser = allUsers.find(u => {
+      const normalizedFullName = (u.fullName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toUpperCase().trim();
+      return normalizedFullName.includes(normalizedIssuer) || normalizedIssuer.includes(normalizedFullName);
+    });
+    if (matchedUser) {
+      revenueUserId = matchedUser.id;
+    }
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     const job = await tx.job.create({ data: { userId: req.user!.id, type: JobType.SINGLE_POLICY, payload: input } });
-    const policy = await tx.policy.create({ data: { ...input, userId: req.user!.id, jobId: job.id } });
+    const policy = await tx.policy.create({ data: { ...input, userId: req.user!.id, revenueUserId, jobId: job.id } });
     return { job, policy };
   });
   const queued = await enqueuePolicyJob({ type: "SINGLE_POLICY", dbJobId: result.job.id, policyId: result.policy.id });

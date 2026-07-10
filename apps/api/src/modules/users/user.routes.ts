@@ -58,30 +58,30 @@ userRouter.get("/", asyncHandler(async (req, res) => {
   const userIds = items.map((u) => u.id);
   const [policyCounts, premiumSums] = await Promise.all([
     prisma.policy.groupBy({
-      by: ["userId"],
-      where: { userId: { in: userIds }, status: "ISSUED" },
+      by: ["revenueUserId"],
+      where: { revenueUserId: { in: userIds }, status: "ISSUED" },
       _count: true
     }),
     prisma.policy.groupBy({
-      by: ["userId"],
-      where: { userId: { in: userIds }, status: "ISSUED" },
+      by: ["revenueUserId"],
+      where: { revenueUserId: { in: userIds }, status: "ISSUED" },
       _sum: { premium: true }
     })
   ]);
 
   const statsMap = new Map(userIds.map((id) => [id, { count: 0, premium: 0 }]));
   for (const item of policyCounts) {
-    if (item.userId) {
-      const stat = statsMap.get(item.userId) || { count: 0, premium: 0 };
+    if (item.revenueUserId) {
+      const stat = statsMap.get(item.revenueUserId) || { count: 0, premium: 0 };
       stat.count = item._count;
-      statsMap.set(item.userId, stat);
+      statsMap.set(item.revenueUserId, stat);
     }
   }
   for (const item of premiumSums) {
-    if (item.userId) {
-      const stat = statsMap.get(item.userId) || { count: 0, premium: 0 };
+    if (item.revenueUserId) {
+      const stat = statsMap.get(item.revenueUserId) || { count: 0, premium: 0 };
       stat.premium = Number(item._sum.premium ?? 0);
-      statsMap.set(item.userId, stat);
+      statsMap.set(item.revenueUserId, stat);
     }
   }
 
@@ -94,6 +94,9 @@ userRouter.get("/", asyncHandler(async (req, res) => {
 }));
 
 userRouter.post("/", asyncHandler(async (req, res) => {
+  if (req.user!.username !== "0869200835") {
+    throw new AppError(403, "Chỉ tài khoản Master mới có quyền tạo thêm tài khoản");
+  }
   const input = createSchema.parse(req.body);
   if (req.user!.role === UserRole.MANAGER && input.role !== UserRole.CTV) {
     throw new AppError(403, "Quản lý chỉ được phép tạo tài khoản CTV");

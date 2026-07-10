@@ -53,11 +53,24 @@ const Field = ({
   required?: boolean;
   defaultValue?: string | number;
 } & InputHTMLAttributes<HTMLInputElement>) => (
-  <div className="space-y-2">
+  <div className="space-y-1">
     <Label htmlFor={name}>{label}</Label>
     <Input id={name} name={name} type={type} required={required} defaultValue={defaultValue} {...props} />
   </div>
 );
+
+function getInitialEffectiveDate() {
+  const now = new Date();
+  const target = new Date(now.getTime() + 10 * 60 * 1000);
+  let m = target.getMinutes();
+  let roundedM = Math.ceil(m / 5) * 5;
+  if (roundedM === 60) {
+    target.setHours(target.getHours() + 1);
+    roundedM = 0;
+  }
+  target.setMinutes(roundedM);
+  return `${String(target.getDate()).padStart(2, "0")}/${String(target.getMonth() + 1).padStart(2, "0")}/${target.getFullYear()}`;
+}
 
 export function NewPolicyPage() {
   const { user } = useAuth();
@@ -76,6 +89,26 @@ export function NewPolicyPage() {
   const [chassisNumber, setChassisNumber] = useState("");
   const [engineNumber, setEngineNumber] = useState("");
   const [seatCount, setSeatCount] = useState<number>(5);
+  const [hasNntx, setHasNntx] = useState(false);
+  const [effectiveDateText, setEffectiveDateText] = useState(getInitialEffectiveDate);
+
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let val = e.target.value.replace(/\D/g, "");
+    if (val.length > 8) {
+      val = val.substring(0, 8);
+    }
+    let formatted = "";
+    if (val.length > 0) {
+      formatted += val.substring(0, 2);
+    }
+    if (val.length > 2) {
+      formatted += "/" + val.substring(2, 4);
+    }
+    if (val.length > 4) {
+      formatted += "/" + val.substring(4, 8);
+    }
+    setEffectiveDateText(formatted);
+  };
 
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
@@ -223,7 +256,6 @@ export function NewPolicyPage() {
   }
   target.setMinutes(roundedM);
 
-  const defaultDate = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-${String(target.getDate()).padStart(2, "0")}`;
   const defaultHour = String(target.getHours()).padStart(2, "0");
   const defaultMinute = String(target.getMinutes()).padStart(2, "0");
 
@@ -254,6 +286,7 @@ export function NewPolicyPage() {
           text: "Vui lòng nhập Số điện thoại nhận GCN hoặc Đại lý"
         });
         setBusy(false);
+        submittingRef.current = false;
         return;
       }
     }
@@ -267,6 +300,7 @@ export function NewPolicyPage() {
         text: "Số chỗ mua NNTX lớn hơn Số chỗ ngồi trên xe"
       });
       setBusy(false);
+      submittingRef.current = false;
       return;
     }
 
@@ -285,6 +319,7 @@ export function NewPolicyPage() {
         text: "Vui lòng cung cấp Biển số xe hoặc cặp Số khung + Số máy"
       });
       setBusy(false);
+      submittingRef.current = false;
       return;
     }
 
@@ -308,11 +343,48 @@ export function NewPolicyPage() {
 
     if (!body.seatCount) delete body.seatCount;
 
+    // Validate & format effectiveDate
+    const dateStr = String(body.effectiveDate || "").trim();
+    const dateRegex = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+    const dateMatch = dateStr.match(dateRegex);
+    if (!dateMatch) {
+      setMessage({
+        ok: false,
+        text: "Ngày bắt đầu hiệu lực phải theo định dạng dd/mm/yyyy"
+      });
+      setBusy(false);
+      submittingRef.current = false;
+      return;
+    }
+    const [_, day, month, year] = dateMatch;
+    const dVal = parseInt(day, 10);
+    const mVal = parseInt(month, 10);
+    const yVal = parseInt(year, 10);
+    if (mVal < 1 || mVal > 12 || dVal < 1 || dVal > 31) {
+      setMessage({
+        ok: false,
+        text: "Ngày hoặc tháng hiệu lực không hợp lệ"
+      });
+      setBusy(false);
+      submittingRef.current = false;
+      return;
+    }
+    const dateYMD = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+    const parsedDate = new Date(`${dateYMD}T00:00:00`);
+    if (isNaN(parsedDate.getTime())) {
+      setMessage({
+        ok: false,
+        text: "Ngày hiệu lực không tồn tại"
+      });
+      setBusy(false);
+      submittingRef.current = false;
+      return;
+    }
+
     // Combine Date, Hour, Minute
-    const dateStr = body.effectiveDate;
     const hour = body.effectiveHour || "00";
     const minute = body.effectiveMinute || "00";
-    body.effectiveDate = new Date(`${dateStr}T${hour}:${minute}:00`).toISOString();
+    body.effectiveDate = new Date(`${dateYMD}T${hour}:${minute}:00`).toISOString();
     
     delete body.effectiveHour;
     delete body.effectiveMinute;
@@ -335,6 +407,8 @@ export function NewPolicyPage() {
       setSeatCount(5);
       setOcrSuccess(null);
       setOcrError(null);
+      setEffectiveDateText(getInitialEffectiveDate());
+      setHasNntx(false);
     } catch (err) {
       setMessage({
         ok: false,
@@ -347,14 +421,14 @@ export function NewPolicyPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl pt-4">
-      <form onSubmit={submit} className="space-y-6">
+    <div className="mx-auto max-w-3xl pt-2">
+      <form onSubmit={submit} className="space-y-4">
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4 border-b">
-            <CardTitle className="text-xl font-bold text-stone-800">Tạo đơn Bảo hiểm BB TNDS</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 border-b">
+            <CardTitle className="text-lg font-bold text-stone-800">Tạo đơn Bảo hiểm BB TNDS</CardTitle>
             <div className="flex items-center gap-2">
               <Link to="/policies" className="relative">
-                <Button type="button" variant="outline" className="px-4 py-2 relative flex items-center gap-1.5">
+                <Button type="button" variant="outline" className="px-3 py-1.5 h-9 relative flex items-center gap-1.5 text-xs">
                   Danh sách đơn
                   {hasNewPolicy && (
                     <span className="absolute -top-1 -right-1 flex h-2 w-2">
@@ -364,25 +438,24 @@ export function NewPolicyPage() {
                   )}
                 </Button>
               </Link>
-              <Button type="submit" disabled={busy} className="px-6 py-2 flex items-center gap-2">
-                <Send size={15} />
+              <Button type="submit" disabled={busy} className="px-4 py-1.5 h-9 flex items-center gap-1.5 text-xs">
+                <Send size={13} />
                 {busy ? "Đang gửi..." : "Phát hành"}
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="pt-6 space-y-6">
+          <CardContent className="pt-4 space-y-4">
             {/* Ẩn Giới tính (mặc định NAM) và Email (mặc định qphuocins@gmail.com) */}
             <input type="hidden" name="gender" value="NAM" />
             <input type="hidden" name="email" value="qphuocins@gmail.com" />
 
             {/* OCR Dropzone */}
             <div className="space-y-2">
-              <Label className="text-sm font-semibold text-stone-700">Tải tài liệu điền tự động (Đăng ký xe / Đăng kiểm / Hoá đơn)</Label>
               <div 
-                className={`relative flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-6 transition-all duration-300 ${
+                className={`relative flex flex-col md:flex-row items-center justify-between border border-dashed rounded-lg p-3 transition-all duration-300 ${
                   dragActive 
                     ? "border-orange-500 bg-orange-50/50 scale-[1.01]" 
-                    : "border-stone-200 hover:border-orange-400 bg-stone-50/50 hover:bg-orange-50/10"
+                    : "border-stone-200 hover:border-orange-400 bg-stone-50/30 hover:bg-orange-50/10"
                 }`}
                 onDragEnter={handleDrag}
                 onDragOver={handleDrag}
@@ -397,33 +470,36 @@ export function NewPolicyPage() {
                   onChange={handleFileChange}
                   disabled={ocrLoading}
                 />
-                <label 
-                  htmlFor="ocr-file-upload" 
-                  className={`flex flex-col items-center justify-center cursor-pointer space-y-2 w-full ${ocrLoading ? "pointer-events-none" : ""}`}
-                >
-                  {ocrLoading ? (
-                    <div className="flex flex-col items-center space-y-2 py-2">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
-                      <p className="text-sm font-medium text-stone-600 animate-pulse">Đang quét ảnh/PDF và nhận diện thông tin...</p>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="p-3 bg-white rounded-full shadow-sm text-stone-500 border border-stone-100 group-hover:text-orange-500 transition-colors">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                
+                {ocrLoading ? (
+                  <div className="flex items-center gap-3 py-1 w-full justify-center">
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-orange-500"></div>
+                    <p className="text-xs font-semibold text-stone-600 animate-pulse">Đang quét ảnh/PDF và nhận diện thông tin...</p>
+                  </div>
+                ) : (
+                  <label 
+                    htmlFor="ocr-file-upload" 
+                    className="flex flex-col sm:flex-row items-center justify-between gap-3 cursor-pointer w-full"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="p-1.5 bg-orange-100 rounded-lg text-orange-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                         </svg>
                       </div>
-                      <div className="text-center">
-                        <span className="text-sm font-semibold text-orange-600 hover:text-orange-700">Click để chọn ảnh/PDF</span>
-                        <span className="text-sm text-stone-500"> hoặc kéo thả vào đây</span>
+                      <div className="text-left">
+                        <p className="text-xs font-bold text-stone-700">Tự động điền thông tin bằng OCR</p>
+                        <p className="text-[10px] text-stone-400">Chọn hoặc kéo thả Đăng ký / Đăng kiểm / Hoá đơn (PDF, JPG, PNG)</p>
                       </div>
-                      <p className="text-xs text-stone-400">Chấp nhận JPG, JPEG, PNG, PDF (Tối đa 20MB)</p>
-                    </>
-                  )}
-                </label>
+                    </div>
+                    <div className="px-3 py-1 bg-white border border-stone-200 hover:border-orange-500 rounded-md text-[11px] font-bold text-orange-600 hover:bg-orange-50 transition-colors shadow-sm whitespace-nowrap">
+                      Chọn tệp tài liệu
+                    </div>
+                  </label>
+                )}
               </div>
               {ocrSuccess && (
-                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 p-2.5 rounded-lg animate-fadeIn">
+                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 p-2 rounded-lg animate-fadeIn">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                   </svg>
@@ -431,7 +507,7 @@ export function NewPolicyPage() {
                 </div>
               )}
               {ocrError && (
-                <div className="flex items-center gap-2 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-100 p-2.5 rounded-lg animate-fadeIn">
+                <div className="flex items-center gap-2 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-100 p-2 rounded-lg animate-fadeIn">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                   </svg>
@@ -440,15 +516,15 @@ export function NewPolicyPage() {
               )}
             </div>
 
-            <hr className="my-6 border-stone-100" />
+            <hr className="my-4 border-stone-100" />
 
-            <div className="grid gap-4 md:grid-cols-6">
+            <div className="grid gap-3 grid-cols-1 md:grid-cols-12">
               
               {/* Dòng 1: Cấu hình động theo tài khoản */}
               {isSpecialUser ? (
                 <>
                   {issuerMode === "select" ? (
-                    <div className="md:col-span-2 space-y-2">
+                    <div className="col-span-1 md:col-span-4 space-y-1">
                       <Label htmlFor="issuerSelect">Người cấp</Label>
                       <Select
                         id="issuerSelect"
@@ -469,7 +545,7 @@ export function NewPolicyPage() {
                       <input type="hidden" name="issuerName" value={selectedIssuer} />
                     </div>
                   ) : (
-                    <div className="md:col-span-2 space-y-2">
+                    <div className="col-span-1 md:col-span-4 space-y-1">
                       <div className="flex justify-between items-center">
                         <Label htmlFor="customIssuerInput">Người cấp</Label>
                         <button
@@ -490,34 +566,34 @@ export function NewPolicyPage() {
                       />
                     </div>
                   )}
-                  <div className="md:col-span-2">
+                  <div className="col-span-1 md:col-span-4">
                     <Field label="Đại lý" name="agent" required={false} />
                   </div>
-                  <div className="md:col-span-2">
+                  <div className="col-span-1 md:col-span-4">
                     <Field label="Số điện thoại nhận GCN" name="phone" required={false} value={phone} onChange={(e) => setPhone(e.target.value)} />
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="md:col-span-3">
+                  <div className="col-span-1 md:col-span-6">
                     <Field label="Đại lý" name="agent" required={false} />
                   </div>
-                  <div className="md:col-span-3">
+                  <div className="col-span-1 md:col-span-6">
                     <Field label="Số điện thoại nhận GCN" name="phone" required={false} value={phone} onChange={(e) => setPhone(e.target.value)} />
                   </div>
                 </>
               )}
 
               {/* Dòng 2: Họ tên chủ xe - Địa chỉ trên đăng ký */}
-              <div className="md:col-span-3">
+              <div className="col-span-1 md:col-span-6">
                 <Field label="Họ tên chủ xe" name="customerName" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
               </div>
-              <div className="md:col-span-3">
+              <div className="col-span-1 md:col-span-6">
                 <Field label="Địa chỉ trên đăng ký" name="address" value={address} onChange={(e) => setAddress(e.target.value)} />
               </div>
 
               {/* Dòng 3: Biển số - Số khung - Số máy */}
-              <div className="md:col-span-2">
+              <div className="col-span-1 md:col-span-4">
                 <Field
                   label="Biển số"
                   name="plateNumber"
@@ -529,7 +605,7 @@ export function NewPolicyPage() {
                   }}
                 />
               </div>
-              <div className="md:col-span-2">
+              <div className="col-span-1 md:col-span-4">
                 <Field
                   label="Số khung"
                   name="chassisNumber"
@@ -538,7 +614,7 @@ export function NewPolicyPage() {
                   onChange={(e) => setChassisNumber(restoreTelexAndUppercase(e.target.value))}
                 />
               </div>
-              <div className="md:col-span-2">
+              <div className="col-span-1 md:col-span-4">
                 <Field
                   label="Số máy"
                   name="engineNumber"
@@ -548,8 +624,8 @@ export function NewPolicyPage() {
                 />
               </div>
 
-              {/* Dòng 5: Loại xe - Số chỗ ngồi - Ngày bắt đầu */}
-              <div className="md:col-span-2 space-y-2">
+              {/* Dòng 4: Loại xe - Số chỗ ngồi */}
+              <div className="col-span-1 md:col-span-8 space-y-1">
                 <Label htmlFor="vehicleType">Loại xe</Label>
                 <Select id="vehicleType" name="vehicleType" required defaultValue="XE Ô TÔ KHÔNG KD VẬN TẢI & XE BUÝT">
                   {vehicleTypes.map((v) => (
@@ -557,16 +633,24 @@ export function NewPolicyPage() {
                   ))}
                 </Select>
               </div>
-              <div className="md:col-span-2">
+              <div className="col-span-1 md:col-span-4">
                 <Field label="Số chỗ ngồi" name="seatCount" type="number" required value={seatCount} onChange={(e) => setSeatCount(Number(e.target.value))} />
               </div>
-              <div className="md:col-span-2 space-y-2">
-                <Label htmlFor="effectiveDate">Ngày bắt đầu hiệu lực</Label>
-                <Input id="effectiveDate" name="effectiveDate" type="date" required defaultValue={defaultDate} />
-              </div>
 
-              {/* Dòng 6: Giờ - Phút - Số năm bảo hiểm */}
-              <div className="md:col-span-2 space-y-2">
+              {/* Dòng 5: Ngày bắt đầu - Giờ - Phút - Số năm bảo hiểm */}
+              <div className="col-span-1 md:col-span-4 space-y-1">
+                <Label htmlFor="effectiveDate">Ngày bắt đầu hiệu lực</Label>
+                <Input 
+                  id="effectiveDate" 
+                  name="effectiveDate" 
+                  type="text" 
+                  placeholder="dd/mm/yyyy"
+                  required 
+                  value={effectiveDateText} 
+                  onChange={handleDateChange} 
+                />
+              </div>
+              <div className="col-span-1 md:col-span-3 space-y-1">
                 <Label htmlFor="effectiveHour">Giờ hiệu lực</Label>
                 <Select id="effectiveHour" name="effectiveHour" required defaultValue={defaultHour}>
                   {Array.from({ length: 24 }).map((_, i) => {
@@ -575,8 +659,8 @@ export function NewPolicyPage() {
                   })}
                 </Select>
               </div>
-              <div className="md:col-span-2 space-y-2">
-                <Label htmlFor="effectiveMinute">Phút hiệu lực</Label>
+              <div className="col-span-1 md:col-span-2 space-y-1">
+                <Label htmlFor="effectiveMinute">Phút</Label>
                 <Select id="effectiveMinute" name="effectiveMinute" required defaultValue={defaultMinute}>
                   {Array.from({ length: 12 }).map((_, i) => {
                     const m = String(i * 5).padStart(2, "0");
@@ -584,8 +668,8 @@ export function NewPolicyPage() {
                   })}
                 </Select>
               </div>
-              <div className="md:col-span-2 space-y-2">
-                <Label htmlFor="insuranceYears">Số năm bảo hiểm</Label>
+              <div className="col-span-1 md:col-span-3 space-y-1">
+                <Label htmlFor="insuranceYears">Số năm BH</Label>
                 <Select id="insuranceYears" name="insuranceYears" required defaultValue={1}>
                   <option value={1}>1 năm</option>
                   <option value={2}>2 năm</option>
@@ -593,18 +677,41 @@ export function NewPolicyPage() {
                 </Select>
               </div>
 
-              {/* Dòng 7: Số chỗ mua NNTX - Phí bảo hiểm/ 1 chỗ ngồi (NNTX) */}
-              <div className="md:col-span-3">
-                <Field label="Số chỗ mua NNTX" name="passengerCount" type="number" required defaultValue={0} />
+              {/* Dòng 6: Checkbox NNTX */}
+              <div className="col-span-1 md:col-span-12 flex items-center gap-2 py-1">
+                <input 
+                  type="checkbox" 
+                  id="hasNntx" 
+                  checked={hasNntx} 
+                  onChange={(e) => setHasNntx(e.target.checked)}
+                  className="h-4 w-4 rounded border-stone-300 text-orange-600 focus:ring-orange-500 cursor-pointer"
+                />
+                <Label htmlFor="hasNntx" className="text-xs font-bold text-stone-700 cursor-pointer select-none">
+                  Mua thêm bảo hiểm Tai nạn Người ngồi trên xe (NNTX)
+                </Label>
               </div>
-              <div className="md:col-span-3 space-y-2">
-                <Label htmlFor="passengerFee">Phí bảo hiểm/ 1 chỗ ngồi (NNTX)</Label>
-                <Select id="passengerFee" name="passengerFee" required defaultValue={0}>
-                  {passengerFees.map((f) => (
-                    <option key={f} value={f}>{f.toLocaleString("vi-VN")}đ</option>
-                  ))}
-                </Select>
-              </div>
+
+              {/* NNTX Conditional inputs */}
+              {hasNntx ? (
+                <>
+                  <div className="col-span-1 md:col-span-6">
+                    <Field label="Số chỗ mua NNTX" name="passengerCount" type="number" required defaultValue={seatCount} />
+                  </div>
+                  <div className="col-span-1 md:col-span-6 space-y-1">
+                    <Label htmlFor="passengerFee">Phí bảo hiểm/ 1 chỗ ngồi (NNTX)</Label>
+                    <Select id="passengerFee" name="passengerFee" required defaultValue={20000}>
+                      {passengerFees.map((f) => (
+                        <option key={f} value={f}>{f.toLocaleString("vi-VN")}đ</option>
+                      ))}
+                    </Select>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <input type="hidden" name="passengerCount" value={0} />
+                  <input type="hidden" name="passengerFee" value={0} />
+                </>
+              )}
 
             </div>
 
