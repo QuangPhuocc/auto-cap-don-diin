@@ -1,7 +1,7 @@
 import { Send } from "lucide-react";
 import { FormEvent, useState, useEffect, useRef, InputHTMLAttributes } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Select } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { removeVietnameseTones, restoreTelexAndUppercase, formatPlateNumber } from "../lib/utils";
@@ -45,6 +45,7 @@ const Field = ({
   type = "text",
   required = true,
   defaultValue,
+  error,
   ...props
 }: {
   label: string;
@@ -52,25 +53,14 @@ const Field = ({
   type?: string;
   required?: boolean;
   defaultValue?: string | number;
+  error?: string;
 } & InputHTMLAttributes<HTMLInputElement>) => (
-  <div className="space-y-1">
+  <div className="space-y-2">
     <Label htmlFor={name}>{label}</Label>
-    <Input id={name} name={name} type={type} required={required} defaultValue={defaultValue} {...props} />
+    <Input id={name} name={name} type={type} required={required} defaultValue={defaultValue} className={error ? "border-red-500 focus-visible:ring-red-500" : ""} {...props} />
+    {error && <p className="text-xs text-red-500 font-medium animate-fadeIn">{error}</p>}
   </div>
 );
-
-function getInitialEffectiveDate() {
-  const now = new Date();
-  const target = new Date(now.getTime() + 10 * 60 * 1000);
-  let m = target.getMinutes();
-  let roundedM = Math.ceil(m / 5) * 5;
-  if (roundedM === 60) {
-    target.setHours(target.getHours() + 1);
-    roundedM = 0;
-  }
-  target.setMinutes(roundedM);
-  return `${String(target.getDate()).padStart(2, "0")}/${String(target.getMonth() + 1).padStart(2, "0")}/${target.getFullYear()}`;
-}
 
 export function NewPolicyPage() {
   const { user } = useAuth();
@@ -89,39 +79,29 @@ export function NewPolicyPage() {
   const [chassisNumber, setChassisNumber] = useState("");
   const [engineNumber, setEngineNumber] = useState("");
   const [seatCount, setSeatCount] = useState<number>(5);
-  const [hasNntx, setHasNntx] = useState(false);
-  const [effectiveDateText, setEffectiveDateText] = useState(getInitialEffectiveDate);
-
-  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let val = e.target.value.replace(/\D/g, "");
-    if (val.length > 8) {
-      val = val.substring(0, 8);
-    }
-    let formatted = "";
-    if (val.length > 0) {
-      formatted += val.substring(0, 2);
-    }
-    if (val.length > 2) {
-      formatted += "/" + val.substring(2, 4);
-    }
-    if (val.length > 4) {
-      formatted += "/" + val.substring(4, 8);
-    }
-    setEffectiveDateText(formatted);
-  };
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [ocrSuccess, setOcrSuccess] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const dragCounter = useRef(0);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
+    if (e.type === "dragenter") {
+      dragCounter.current++;
       setDragActive(true);
     } else if (e.type === "dragleave") {
-      setDragActive(false);
+      dragCounter.current--;
+      if (dragCounter.current <= 0) {
+        dragCounter.current = 0;
+        setDragActive(false);
+      }
+    } else if (e.type === "dragover") {
+      // Must prevent default to allow drop
+      e.dataTransfer.dropEffect = "copy";
     }
   };
 
@@ -129,6 +109,7 @@ export function NewPolicyPage() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
+    dragCounter.current = 0;
     
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       await processOcrFile(e.dataTransfer.files[0]);
@@ -227,22 +208,43 @@ export function NewPolicyPage() {
       ["0962731468", "0906643381", "0942542249", "0981740680", "0931183389"].includes(user.username)
     : false;
 
-  const defaultList = ["PHƯỚC", "LINH", "NHI", "DIỄM", "YÊN", "DUY THƯƠNG"];
+  interface IssuerUser {
+    id: string;
+    fullName: string;
+    phone: string | null;
+    username: string;
+  }
+  const [issuers, setIssuers] = useState<IssuerUser[]>([]);
   const [issuerMode, setIssuerMode] = useState<"select" | "custom">("select");
-  const [selectedIssuer, setSelectedIssuer] = useState<string>("");
+  const [selectedIssuerId, setSelectedIssuerId] = useState<string>("");
   const [customIssuer, setCustomIssuer] = useState<string>("");
 
   useEffect(() => {
-    if (user) {
-      const uName = user.fullName.toUpperCase();
-      if (defaultList.includes(uName)) {
-        setIssuerMode("select");
-        setSelectedIssuer(uName);
-      } else {
-        setIssuerMode("custom");
-        setCustomIssuer(user.fullName);
-      }
-    }
+    api<IssuerUser[]>("/users/issuers")
+      .then((res) => {
+        setIssuers(res);
+        if (user && res.length > 0) {
+          const matched = res.find((u) => u.id === user.id);
+          if (matched) {
+            setSelectedIssuerId(matched.id);
+            setIssuerMode("select");
+          } else {
+            const defaultIssuers = ["PHƯỚC", "LINH", "NHI", "DIỄM", "YÊN", "DUY THƯƠNG"];
+            const isDefaultName = defaultIssuers.includes(user.fullName.toUpperCase());
+            if (isDefaultName) {
+              const fallbackMatched = res.find(u => defaultIssuers.includes(u.fullName.toUpperCase()));
+              if (fallbackMatched) {
+                setSelectedIssuerId(fallbackMatched.id);
+                setIssuerMode("select");
+                return;
+              }
+            }
+            setIssuerMode("custom");
+            setCustomIssuer(user.fullName);
+          }
+        }
+      })
+      .catch((err) => console.error("Failed to load issuers:", err));
   }, [user]);
 
   // Default values: cộng 10 phút, làm tròn về đuôi 5 hoặc 10
@@ -256,6 +258,7 @@ export function NewPolicyPage() {
   }
   target.setMinutes(roundedM);
 
+  const defaultDate = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-${String(target.getDate()).padStart(2, "0")}`;
   const defaultHour = String(target.getHours()).padStart(2, "0");
   const defaultMinute = String(target.getMinutes()).padStart(2, "0");
 
@@ -266,6 +269,7 @@ export function NewPolicyPage() {
     const form = e.currentTarget;
     setBusy(true);
     setMessage(null);
+    setFieldErrors({});
     const f = new FormData(form);
     const body = Object.fromEntries(f.entries());
 
@@ -277,17 +281,14 @@ export function NewPolicyPage() {
       specialFullNames.includes(user.fullName.toUpperCase())
     );
 
+    const errors: Record<string, string> = {};
+
     if (isSpecialAccount) {
       const agent = String(body.agent || "").trim();
       const phone = String(body.phone || "").trim();
       if (!agent && !phone) {
-        setMessage({
-          ok: false,
-          text: "Vui lòng nhập Số điện thoại nhận GCN hoặc Đại lý"
-        });
-        setBusy(false);
-        submittingRef.current = false;
-        return;
+        errors.phone = "Vui lòng nhập Số điện thoại hoặc Đại lý";
+        errors.agent = "Vui lòng nhập Số điện thoại hoặc Đại lý";
       }
     }
 
@@ -295,13 +296,7 @@ export function NewPolicyPage() {
     const seat = Number(body.seatCount || 0);
     const passenger = Number(body.passengerCount || 0);
     if (passenger > seat) {
-      setMessage({
-        ok: false,
-        text: "Số chỗ mua NNTX lớn hơn Số chỗ ngồi trên xe"
-      });
-      setBusy(false);
-      submittingRef.current = false;
-      return;
+      errors.passengerCount = "Số chỗ mua NNTX lớn hơn Số chỗ ngồi trên xe";
     }
 
     // Validate plate and chassis/engine constraints
@@ -314,9 +309,16 @@ export function NewPolicyPage() {
     const hasEngine = engine !== "" && engine !== "0";
 
     if (!hasPlate && !(hasChassis && hasEngine)) {
+      errors.plateNumber = "Vui lòng cung cấp Biển số xe hoặc cặp Số khung + Số máy";
+      errors.chassisNumber = "Vui lòng cung cấp Biển số xe hoặc cặp Số khung + Số máy";
+      errors.engineNumber = "Vui lòng cung cấp Biển số xe hoặc cặp Số khung + Số máy";
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       setMessage({
         ok: false,
-        text: "Vui lòng cung cấp Biển số xe hoặc cặp Số khung + Số máy"
+        text: "Vui lòng bổ sung đầy đủ thông tin bị lỗi bên dưới"
       });
       setBusy(false);
       submittingRef.current = false;
@@ -343,48 +345,11 @@ export function NewPolicyPage() {
 
     if (!body.seatCount) delete body.seatCount;
 
-    // Validate & format effectiveDate
-    const dateStr = String(body.effectiveDate || "").trim();
-    const dateRegex = /^(\d{2})\/(\d{2})\/(\d{4})$/;
-    const dateMatch = dateStr.match(dateRegex);
-    if (!dateMatch) {
-      setMessage({
-        ok: false,
-        text: "Ngày bắt đầu hiệu lực phải theo định dạng dd/mm/yyyy"
-      });
-      setBusy(false);
-      submittingRef.current = false;
-      return;
-    }
-    const [_, day, month, year] = dateMatch;
-    const dVal = parseInt(day, 10);
-    const mVal = parseInt(month, 10);
-    const yVal = parseInt(year, 10);
-    if (mVal < 1 || mVal > 12 || dVal < 1 || dVal > 31) {
-      setMessage({
-        ok: false,
-        text: "Ngày hoặc tháng hiệu lực không hợp lệ"
-      });
-      setBusy(false);
-      submittingRef.current = false;
-      return;
-    }
-    const dateYMD = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-    const parsedDate = new Date(`${dateYMD}T00:00:00`);
-    if (isNaN(parsedDate.getTime())) {
-      setMessage({
-        ok: false,
-        text: "Ngày hiệu lực không tồn tại"
-      });
-      setBusy(false);
-      submittingRef.current = false;
-      return;
-    }
-
     // Combine Date, Hour, Minute
+    const dateStr = body.effectiveDate;
     const hour = body.effectiveHour || "00";
     const minute = body.effectiveMinute || "00";
-    body.effectiveDate = new Date(`${dateYMD}T${hour}:${minute}:00`).toISOString();
+    body.effectiveDate = new Date(`${dateStr}T${hour}:${minute}:00`).toISOString();
     
     delete body.effectiveHour;
     delete body.effectiveMinute;
@@ -394,7 +359,7 @@ export function NewPolicyPage() {
         method: "POST",
         body: JSON.stringify(body)
       });
-      setMessage({ ok: true, text: "Đã phát hành" });
+      setMessage({ ok: true, text: "Đã tạo đơn và gửi phát hành thành công" });
       localStorage.setItem("hasNewPolicy", "true");
       window.dispatchEvent(new Event("newPolicyIssued"));
       form.reset();
@@ -407,13 +372,24 @@ export function NewPolicyPage() {
       setSeatCount(5);
       setOcrSuccess(null);
       setOcrError(null);
-      setEffectiveDateText(getInitialEffectiveDate());
-      setHasNntx(false);
     } catch (err) {
-      setMessage({
-        ok: false,
-        text: err instanceof Error ? err.message : "Không tạo được đơn"
-      });
+      if (err instanceof ApiError && err.data?.code === "VALIDATION_ERROR") {
+        const fieldErrorsData = err.data?.errors?.fieldErrors || {};
+        const mappedErrors: Record<string, string> = {};
+        for (const key of Object.keys(fieldErrorsData)) {
+          mappedErrors[key] = fieldErrorsData[key]?.[0] || "Thông tin không hợp lệ";
+        }
+        setFieldErrors(mappedErrors);
+        setMessage({
+          ok: false,
+          text: err.message || "Dữ liệu nhập không hợp lệ"
+        });
+      } else {
+        setMessage({
+          ok: false,
+          text: err instanceof Error ? err.message : "Không tạo được đơn"
+        });
+      }
     } finally {
       submittingRef.current = false;
       setBusy(false);
@@ -421,25 +397,81 @@ export function NewPolicyPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl pt-2">
-      <form onSubmit={submit} className="space-y-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 border-b">
-            <CardTitle className="text-lg font-bold text-stone-800">Tạo đơn Bảo hiểm BB TNDS</CardTitle>
-            <div className="flex items-center gap-2">
-              <Link to="/policies" className="relative">
-                <Button type="button" variant="outline" className="px-3 py-1.5 h-9 relative flex items-center gap-1.5 text-xs">
+    <div 
+      className="mx-auto max-w-4xl pt-4 relative min-h-[400px]"
+      onDragEnter={handleDrag}
+      onDragOver={handleDrag}
+      onDragLeave={handleDrag}
+      onDrop={handleDrop}
+    >
+      {/* Fullscreen style drag-drop overlay */}
+      {dragActive && (
+        <div 
+          className="absolute inset-0 z-50 bg-white/50 rounded-xl border-2 border-dashed border-orange-400 pointer-events-none"
+        />
+      )}
+
+      <div className="mb-4">
+        <h2 className="text-2xl font-bold text-stone-800">Tạo đơn Bảo hiểm BB TNDS hãng VASS Viễn Đông</h2>
+      </div>
+      <form onSubmit={submit} className="space-y-6">
+        <Card className="transition-all duration-300">
+          <CardHeader className="flex flex-row items-center space-y-0 pb-4 border-b">
+            <div className="flex flex-wrap items-center gap-2 md:gap-3 w-full">
+              
+              {/* Nút OCR – desktop: text dài, mobile: gọn */}
+              <label 
+                htmlFor="ocr-file-upload" 
+                className={`flex-1 min-w-0 flex items-center justify-center gap-2 px-3 py-1.5 h-9 md:h-10 border border-dashed border-orange-300 hover:border-orange-400 bg-orange-50/20 hover:bg-orange-50/50 rounded-md text-xs font-bold text-orange-600 cursor-pointer shadow-sm transition-all duration-200 ${
+                  ocrLoading ? "opacity-50 pointer-events-none" : ""
+                }`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-orange-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                {ocrLoading ? (
+                  <span className="truncate">Đang quét tài liệu...</span>
+                ) : (
+                  <>
+                    <span className="md:hidden whitespace-nowrap">Tải ảnh/PDF</span>
+                    <span className="hidden md:inline truncate">Tải lên hoặc kéo thả Đăng ký, đăng kiểm, bảo hiểm cũ, file bảo hiểm, hoá đơn vào đây</span>
+                  </>
+                )}
+                <input 
+                  type="file" 
+                  id="ocr-file-upload" 
+                  className="hidden" 
+                  accept="image/png, image/jpeg, image/jpg, application/pdf"
+                  onChange={handleFileChange}
+                  disabled={ocrLoading}
+                />
+              </label>
+
+              <Link to="/policies" className="relative shrink-0">
+                <Button 
+                  type="button" 
+                  variant={hasNewPolicy ? "default" : "outline"} 
+                  onClick={() => {
+                    setHasNewPolicy(false);
+                    localStorage.setItem("hasNewPolicy", "false");
+                  }}
+                  className={`px-3 md:px-4 py-1.5 md:py-2 h-9 md:h-10 relative flex items-center gap-1.5 text-xs md:text-sm transition-all duration-300 ${
+                    hasNewPolicy 
+                      ? "bg-blue-600 hover:bg-blue-700 text-white border-blue-600 shadow-md shadow-blue-100 animate-pulse scale-[1.03]" 
+                      : ""
+                  }`}
+                >
                   Danh sách đơn
                   {hasNewPolicy && (
-                    <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white"></span>
                     </span>
                   )}
                 </Button>
               </Link>
-              <Button type="submit" disabled={busy} className="px-4 py-1.5 h-9 flex items-center gap-1.5 text-xs">
-                <Send size={13} />
+              <Button type="submit" disabled={busy} className="px-3 md:px-6 py-1.5 md:py-2 h-9 md:h-10 flex items-center gap-1.5 md:gap-2 text-xs md:text-sm shrink-0 ml-auto">
+                <Send size={14} />
                 {busy ? "Đang gửi..." : "Phát hành"}
               </Button>
             </div>
@@ -449,103 +481,70 @@ export function NewPolicyPage() {
             <input type="hidden" name="gender" value="NAM" />
             <input type="hidden" name="email" value="qphuocins@gmail.com" />
 
-            {/* OCR Dropzone */}
-            <div className="space-y-2">
-              <div 
-                className={`relative flex flex-col md:flex-row items-center justify-between border border-dashed rounded-lg p-3 transition-all duration-300 ${
-                  dragActive 
-                    ? "border-orange-500 bg-orange-50/50 scale-[1.01]" 
-                    : "border-stone-200 hover:border-orange-400 bg-stone-50/30 hover:bg-orange-50/10"
-                }`}
-                onDragEnter={handleDrag}
-                onDragOver={handleDrag}
-                onDragLeave={handleDrag}
-                onDrop={handleDrop}
-              >
-                <input 
-                  type="file" 
-                  id="ocr-file-upload" 
-                  className="hidden" 
-                  accept="image/png, image/jpeg, image/jpg, application/pdf"
-                  onChange={handleFileChange}
-                  disabled={ocrLoading}
-                />
-                
-                {ocrLoading ? (
-                  <div className="flex items-center gap-3 py-1 w-full justify-center">
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-orange-500"></div>
-                    <p className="text-xs font-semibold text-stone-600 animate-pulse">Đang quét ảnh/PDF và nhận diện thông tin...</p>
+            {message && (
+              <div className={`rounded-lg p-3 text-sm font-medium border animate-fadeIn ${message.ok ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-red-50 text-red-700 border-red-100"}`}>
+                {message.text}
+              </div>
+            )}
+
+            {/* OCR Status/Result Alerts */}
+            {(ocrLoading || ocrSuccess || ocrError) && (
+              <div className="space-y-2">
+                {ocrLoading && (
+                  <div className="flex items-center gap-2 text-xs font-semibold text-orange-600 bg-orange-50 border border-orange-100 p-2.5 rounded-lg animate-pulse justify-center">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-orange-500"></div>
+                    Đang nhận diện tài liệu và tự động điền form...
                   </div>
-                ) : (
-                  <label 
-                    htmlFor="ocr-file-upload" 
-                    className="flex flex-col sm:flex-row items-center justify-between gap-3 cursor-pointer w-full"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-1.5 bg-orange-100 rounded-lg text-orange-600">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                      </div>
-                      <div className="text-left">
-                        <p className="text-xs font-bold text-stone-700">Tự động điền thông tin bằng OCR</p>
-                        <p className="text-[10px] text-stone-400">Chọn hoặc kéo thả Đăng ký / Đăng kiểm / Hoá đơn (PDF, JPG, PNG)</p>
-                      </div>
-                    </div>
-                    <div className="px-3 py-1 bg-white border border-stone-200 hover:border-orange-500 rounded-md text-[11px] font-bold text-orange-600 hover:bg-orange-50 transition-colors shadow-sm whitespace-nowrap">
-                      Chọn tệp tài liệu
-                    </div>
-                  </label>
+                )}
+                {ocrSuccess && (
+                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 p-2.5 rounded-lg animate-fadeIn">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                    {ocrSuccess}
+                  </div>
+                )}
+                {ocrError && (
+                  <div className="flex items-center gap-2 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-100 p-2.5 rounded-lg animate-fadeIn">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    {ocrError}
+                  </div>
                 )}
               </div>
-              {ocrSuccess && (
-                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 p-2 rounded-lg animate-fadeIn">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  {ocrSuccess}
-                </div>
-              )}
-              {ocrError && (
-                <div className="flex items-center gap-2 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-100 p-2 rounded-lg animate-fadeIn">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                  </svg>
-                  {ocrError}
-                </div>
-              )}
-            </div>
+            )}
 
-            <hr className="my-4 border-stone-100" />
-
-            <div className="grid gap-3 grid-cols-1 md:grid-cols-12">
+            <div className="grid gap-4 md:grid-cols-6">
               
               {/* Dòng 1: Cấu hình động theo tài khoản */}
               {isSpecialUser ? (
                 <>
                   {issuerMode === "select" ? (
-                    <div className="col-span-1 md:col-span-4 space-y-1">
+                    <div className="md:col-span-2 space-y-2">
                       <Label htmlFor="issuerSelect">Người cấp</Label>
                       <Select
                         id="issuerSelect"
-                        value={selectedIssuer}
+                        value={selectedIssuerId}
                         onChange={(e) => {
                           if (e.target.value === "__custom__") {
                             setIssuerMode("custom");
                           } else {
-                            setSelectedIssuer(e.target.value);
+                            setSelectedIssuerId(e.target.value);
                           }
                         }}
                       >
-                        {defaultList.map((name) => (
-                          <option key={name} value={name}>{name}</option>
+                        {issuers.map((iss) => (
+                          <option key={iss.id} value={iss.id}>
+                            {iss.fullName} {iss.phone || iss.username ? ` - ${iss.phone || iss.username}` : ""}
+                          </option>
                         ))}
                         <option value="__custom__">✍️ Gõ tên khác...</option>
                       </Select>
-                      <input type="hidden" name="issuerName" value={selectedIssuer} />
+                      <input type="hidden" name="revenueUserId" value={selectedIssuerId} />
                     </div>
                   ) : (
-                    <div className="col-span-1 md:col-span-4 space-y-1">
+                    <div className="md:col-span-2 space-y-2">
                       <div className="flex justify-between items-center">
                         <Label htmlFor="customIssuerInput">Người cấp</Label>
                         <button
@@ -566,34 +565,34 @@ export function NewPolicyPage() {
                       />
                     </div>
                   )}
-                  <div className="col-span-1 md:col-span-4">
-                    <Field label="Đại lý" name="agent" required={false} />
+                  <div className="md:col-span-2">
+                    <Field label="Đại lý" name="agent" required={false} error={fieldErrors.agent} />
                   </div>
-                  <div className="col-span-1 md:col-span-4">
-                    <Field label="Số điện thoại nhận GCN" name="phone" required={false} value={phone} onChange={(e) => setPhone(e.target.value)} />
+                  <div className="md:col-span-2">
+                    <Field label="Số điện thoại nhận GCN" name="phone" required={false} value={phone} onChange={(e) => setPhone(e.target.value)} error={fieldErrors.phone} />
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="col-span-1 md:col-span-6">
-                    <Field label="Đại lý" name="agent" required={false} />
+                  <div className="md:col-span-3">
+                    <Field label="Đại lý" name="agent" required={false} error={fieldErrors.agent} />
                   </div>
-                  <div className="col-span-1 md:col-span-6">
-                    <Field label="Số điện thoại nhận GCN" name="phone" required={false} value={phone} onChange={(e) => setPhone(e.target.value)} />
+                  <div className="md:col-span-3">
+                    <Field label="Số điện thoại nhận GCN" name="phone" required={false} value={phone} onChange={(e) => setPhone(e.target.value)} error={fieldErrors.phone} />
                   </div>
                 </>
               )}
 
               {/* Dòng 2: Họ tên chủ xe - Địa chỉ trên đăng ký */}
-              <div className="col-span-1 md:col-span-6">
-                <Field label="Họ tên chủ xe" name="customerName" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
+              <div className="md:col-span-3">
+                <Field label="Họ tên chủ xe" name="customerName" value={customerName} onChange={(e) => setCustomerName(e.target.value)} error={fieldErrors.customerName} />
               </div>
-              <div className="col-span-1 md:col-span-6">
-                <Field label="Địa chỉ trên đăng ký" name="address" value={address} onChange={(e) => setAddress(e.target.value)} />
+              <div className="md:col-span-3">
+                <Field label="Địa chỉ trên đăng ký" name="address" value={address} onChange={(e) => setAddress(e.target.value)} error={fieldErrors.address} />
               </div>
 
               {/* Dòng 3: Biển số - Số khung - Số máy */}
-              <div className="col-span-1 md:col-span-4">
+              <div className="md:col-span-2">
                 <Field
                   label="Biển số"
                   name="plateNumber"
@@ -603,29 +602,32 @@ export function NewPolicyPage() {
                   onBlur={(e) => {
                     setPlateNumber(formatPlateNumber(e.target.value));
                   }}
+                  error={fieldErrors.plateNumber}
                 />
               </div>
-              <div className="col-span-1 md:col-span-4">
+              <div className="md:col-span-2">
                 <Field
                   label="Số khung"
                   name="chassisNumber"
                   required={false}
                   value={chassisNumber}
                   onChange={(e) => setChassisNumber(restoreTelexAndUppercase(e.target.value))}
+                  error={fieldErrors.chassisNumber}
                 />
               </div>
-              <div className="col-span-1 md:col-span-4">
+              <div className="md:col-span-2">
                 <Field
                   label="Số máy"
                   name="engineNumber"
                   required={false}
                   value={engineNumber}
                   onChange={(e) => setEngineNumber(restoreTelexAndUppercase(e.target.value))}
+                  error={fieldErrors.engineNumber}
                 />
               </div>
 
-              {/* Dòng 4: Loại xe - Số chỗ ngồi */}
-              <div className="col-span-1 md:col-span-8 space-y-1">
+              {/* Dòng 5: Loại xe - Số chỗ ngồi - Ngày bắt đầu */}
+              <div className="md:col-span-2 space-y-2">
                 <Label htmlFor="vehicleType">Loại xe</Label>
                 <Select id="vehicleType" name="vehicleType" required defaultValue="XE Ô TÔ KHÔNG KD VẬN TẢI & XE BUÝT">
                   {vehicleTypes.map((v) => (
@@ -633,24 +635,16 @@ export function NewPolicyPage() {
                   ))}
                 </Select>
               </div>
-              <div className="col-span-1 md:col-span-4">
-                <Field label="Số chỗ ngồi" name="seatCount" type="number" required value={seatCount} onChange={(e) => setSeatCount(Number(e.target.value))} />
+              <div className="md:col-span-2">
+                <Field label="Số chỗ ngồi" name="seatCount" type="number" required value={seatCount} onChange={(e) => setSeatCount(Number(e.target.value))} error={fieldErrors.seatCount} />
+              </div>
+              <div className="md:col-span-2 space-y-2">
+                <Label htmlFor="effectiveDate">Ngày bắt đầu hiệu lực</Label>
+                <Input id="effectiveDate" name="effectiveDate" type="date" required defaultValue={defaultDate} />
               </div>
 
-              {/* Dòng 5: Ngày bắt đầu - Giờ - Phút - Số năm bảo hiểm */}
-              <div className="col-span-1 md:col-span-4 space-y-1">
-                <Label htmlFor="effectiveDate">Ngày bắt đầu hiệu lực</Label>
-                <Input 
-                  id="effectiveDate" 
-                  name="effectiveDate" 
-                  type="text" 
-                  placeholder="dd/mm/yyyy"
-                  required 
-                  value={effectiveDateText} 
-                  onChange={handleDateChange} 
-                />
-              </div>
-              <div className="col-span-1 md:col-span-3 space-y-1">
+              {/* Dòng 6: Giờ - Phút - Số năm bảo hiểm */}
+              <div className="md:col-span-2 space-y-2">
                 <Label htmlFor="effectiveHour">Giờ hiệu lực</Label>
                 <Select id="effectiveHour" name="effectiveHour" required defaultValue={defaultHour}>
                   {Array.from({ length: 24 }).map((_, i) => {
@@ -659,8 +653,8 @@ export function NewPolicyPage() {
                   })}
                 </Select>
               </div>
-              <div className="col-span-1 md:col-span-2 space-y-1">
-                <Label htmlFor="effectiveMinute">Phút</Label>
+              <div className="md:col-span-2 space-y-2">
+                <Label htmlFor="effectiveMinute">Phút hiệu lực</Label>
                 <Select id="effectiveMinute" name="effectiveMinute" required defaultValue={defaultMinute}>
                   {Array.from({ length: 12 }).map((_, i) => {
                     const m = String(i * 5).padStart(2, "0");
@@ -668,8 +662,8 @@ export function NewPolicyPage() {
                   })}
                 </Select>
               </div>
-              <div className="col-span-1 md:col-span-3 space-y-1">
-                <Label htmlFor="insuranceYears">Số năm BH</Label>
+              <div className="md:col-span-2 space-y-2">
+                <Label htmlFor="insuranceYears">Số năm bảo hiểm</Label>
                 <Select id="insuranceYears" name="insuranceYears" required defaultValue={1}>
                   <option value={1}>1 năm</option>
                   <option value={2}>2 năm</option>
@@ -677,49 +671,21 @@ export function NewPolicyPage() {
                 </Select>
               </div>
 
-              {/* Dòng 6: Checkbox NNTX */}
-              <div className="col-span-1 md:col-span-12 flex items-center gap-2 py-1">
-                <input 
-                  type="checkbox" 
-                  id="hasNntx" 
-                  checked={hasNntx} 
-                  onChange={(e) => setHasNntx(e.target.checked)}
-                  className="h-4 w-4 rounded border-stone-300 text-orange-600 focus:ring-orange-500 cursor-pointer"
-                />
-                <Label htmlFor="hasNntx" className="text-xs font-bold text-stone-700 cursor-pointer select-none">
-                  Mua thêm bảo hiểm Tai nạn Người ngồi trên xe (NNTX)
-                </Label>
+              {/* Dòng 7: Số chỗ mua NNTX - Phí bảo hiểm/ 1 chỗ ngồi (NNTX) */}
+              <div className="md:col-span-3">
+                <Field label="Số chỗ mua NNTX" name="passengerCount" type="number" required defaultValue={0} error={fieldErrors.passengerCount} />
               </div>
-
-              {/* NNTX Conditional inputs */}
-              {hasNntx ? (
-                <>
-                  <div className="col-span-1 md:col-span-6">
-                    <Field label="Số chỗ mua NNTX" name="passengerCount" type="number" required defaultValue={seatCount} />
-                  </div>
-                  <div className="col-span-1 md:col-span-6 space-y-1">
-                    <Label htmlFor="passengerFee">Phí bảo hiểm/ 1 chỗ ngồi (NNTX)</Label>
-                    <Select id="passengerFee" name="passengerFee" required defaultValue={20000}>
-                      {passengerFees.map((f) => (
-                        <option key={f} value={f}>{f.toLocaleString("vi-VN")}đ</option>
-                      ))}
-                    </Select>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <input type="hidden" name="passengerCount" value={0} />
-                  <input type="hidden" name="passengerFee" value={0} />
-                </>
-              )}
+              <div className="md:col-span-3 space-y-2">
+                <Label htmlFor="passengerFee">Phí bảo hiểm/ 1 chỗ ngồi (NNTX)</Label>
+                <Select id="passengerFee" name="passengerFee" required defaultValue={0}>
+                  {passengerFees.map((f) => (
+                    <option key={f} value={f}>{f.toLocaleString("vi-VN")}đ</option>
+                  ))}
+                </Select>
+              </div>
 
             </div>
 
-            {message && (
-              <p className={`rounded-lg p-3 text-sm font-medium ${message.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
-                {message.text}
-              </p>
-            )}
           </CardContent>
         </Card>
       </form>

@@ -149,11 +149,9 @@ export class DiinService {
       await page.locator("#Attributes_Seat").fill(String(policy.seatCount));
     }
 
-    // Biển số: KHÔNG điền nếu null/undefined/empty/"0"
-    const hasPlate = policy.plateNumber && policy.plateNumber !== "0" && policy.plateNumber.trim() !== "";
-    if (hasPlate) {
-      await page.locator("#LicensePlates").fill(policy.plateNumber);
-    }
+    // Biển số: Luôn điền, nếu rỗng/null/undefined hoặc là "0" thì điền "0"
+    const plateToFill = (policy.plateNumber && policy.plateNumber.trim() !== "") ? policy.plateNumber : "0";
+    await page.locator("#LicensePlates").fill(plateToFill);
 
     if (policy.gender) {
       const genderVal = policy.gender === "NỮ" ? "0" : "1";
@@ -168,12 +166,13 @@ export class DiinService {
     if (policy.email) {
       await page.locator("#Email").fill(policy.email);
     }
-    if (policy.chassisNumber != null && policy.chassisNumber !== "" && policy.chassisNumber !== "0") {
-      await page.locator("#ChassisNumber").fill(policy.chassisNumber);
-    }
-    if (policy.engineNumber != null && policy.engineNumber !== "" && policy.engineNumber !== "0") {
-      await page.locator("#MachineNumber").fill(policy.engineNumber);
-    }
+    // Số khung: Luôn điền, nếu rỗng/null/undefined hoặc là "0" thì điền "0"
+    const chassisToFill = (policy.chassisNumber && policy.chassisNumber.trim() !== "") ? policy.chassisNumber : "0";
+    await page.locator("#ChassisNumber").fill(chassisToFill);
+
+    // Số máy: Luôn điền, nếu rỗng/null/undefined hoặc là "0" thì điền "0"
+    const engineToFill = (policy.engineNumber && policy.engineNumber.trim() !== "") ? policy.engineNumber : "0";
+    await page.locator("#MachineNumber").fill(engineToFill);
 
     // Thời gian hiệu lực — tự động đẩy lên hiện tại nếu quá khứ
     let effDate = policy.effectiveDate ? new Date(policy.effectiveDate) : new Date();

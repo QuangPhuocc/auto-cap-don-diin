@@ -146,7 +146,15 @@ policyRouter.post("/single", asyncHandler(async (req, res) => {
   }
 
   let revenueUserId = req.user!.id;
-  if (input.issuerName) {
+  let issuerName = input.issuerName;
+
+  if (input.revenueUserId) {
+    const targetUser = await prisma.user.findUnique({ where: { id: input.revenueUserId } });
+    if (targetUser) {
+      revenueUserId = targetUser.id;
+      issuerName = targetUser.fullName;
+    }
+  } else if (input.issuerName) {
     const allUsers = await prisma.user.findMany();
     const normalizedIssuer = input.issuerName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toUpperCase().trim();
     const matchedUser = allUsers.find(u => {
@@ -155,12 +163,13 @@ policyRouter.post("/single", asyncHandler(async (req, res) => {
     });
     if (matchedUser) {
       revenueUserId = matchedUser.id;
+      issuerName = matchedUser.fullName;
     }
   }
 
   const result = await prisma.$transaction(async (tx) => {
-    const job = await tx.job.create({ data: { userId: req.user!.id, type: JobType.SINGLE_POLICY, payload: input } });
-    const policy = await tx.policy.create({ data: { ...input, userId: req.user!.id, revenueUserId, jobId: job.id } });
+    const job = await tx.job.create({ data: { userId: req.user!.id, type: JobType.SINGLE_POLICY, payload: { ...input, issuerName, revenueUserId } } });
+    const policy = await tx.policy.create({ data: { ...input, issuerName, userId: req.user!.id, revenueUserId, jobId: job.id } });
     return { job, policy };
   });
   const queued = await enqueuePolicyJob({ type: "SINGLE_POLICY", dbJobId: result.job.id, policyId: result.policy.id });
@@ -210,8 +219,8 @@ Cấu trúc JSON cần trả về:
 }
 Lưu ý quan trọng: Chỉ trả về chuỗi JSON thô chứa dữ liệu trích xuất được. Tuyệt đối không bao bọc bởi markdown block \`\`\`json hay bất cứ giải thích nào khác.`;
 
-  try {
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const callGeminiModel = async (model: string) => {
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     const response = await fetch(geminiUrl, {
       method: "POST",
       headers: {
@@ -244,7 +253,30 @@ Lưu ý quan trọng: Chỉ trả về chuỗi JSON thô chứa dữ liệu trí
       throw new Error(errBody.error?.message || `Lỗi kết nối Gemini API (${response.status})`);
     }
 
-    const resData = await response.json() as any;
+    return response.json() as any;
+  };
+
+  try {
+    let resData: any;
+    try {
+      resData = await callGeminiModel("gemini-2.5-flash");
+    } catch (firstErr: any) {
+      const errMsg = String(firstErr.message || "").toLowerCase();
+      const isRateLimit = errMsg.includes("high demand") || 
+                          errMsg.includes("rate limit") || 
+                          errMsg.includes("429") || 
+                          errMsg.includes("503") || 
+                          errMsg.includes("quota");
+      if (isRateLimit) {
+        req.log.warn("Gemini 2.5 Flash is overloaded, trying fallback model gemini-1.5-flash...");
+        // Wait 300ms before fallback
+        await new Promise(r => setTimeout(r, 300));
+        resData = await callGeminiModel("gemini-1.5-flash");
+      } else {
+        throw firstErr;
+      }
+    }
+
     const textResult = resData.candidates?.[0]?.content?.parts?.[0]?.text;
     
     if (!textResult) {
@@ -282,7 +314,12 @@ policyRouter.get("/export", asyncHandler(async (req, res) => {
   const userIdQuery = req.query.userId ? String(req.query.userId) : undefined;
   let own = {};
   if (user.role === UserRole.CTV) {
-    own = { userId: user.id };
+    own = {
+      OR: [
+        { userId: user.id },
+        { revenueUserId: user.id }
+      ]
+    };
   } else if (user.role === UserRole.MANAGER) {
     const ctvUsers = await prisma.user.findMany({
       where: { creatorId: user.id },
@@ -291,15 +328,30 @@ policyRouter.get("/export", asyncHandler(async (req, res) => {
     const allowedUserIds = [user.id, ...ctvUsers.map(u => u.id)];
     if (userIdQuery) {
       if (allowedUserIds.includes(userIdQuery)) {
-        own = { userId: userIdQuery };
+        own = {
+          OR: [
+            { userId: userIdQuery },
+            { revenueUserId: userIdQuery }
+          ]
+        };
       } else {
         own = { userId: { in: [] } };
       }
     } else {
-      own = { userId: { in: allowedUserIds } };
+      own = {
+        OR: [
+          { userId: { in: allowedUserIds } },
+          { revenueUserId: { in: allowedUserIds } }
+        ]
+      };
     }
   } else {
-    own = userIdQuery ? { userId: userIdQuery } : {};
+    own = userIdQuery ? {
+      OR: [
+        { userId: userIdQuery },
+        { revenueUserId: userIdQuery }
+      ]
+    } : {};
   }
   
   const month = req.query.month ? Number(req.query.month) : undefined;

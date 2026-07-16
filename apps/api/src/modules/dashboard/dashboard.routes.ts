@@ -35,17 +35,22 @@ dashboardRouter.get("/stats", asyncHandler(async (req, res) => {
     };
   }
 
-  let policyWhere: any = { ...dateFilter };
+  let policyCountWhere: any = { ...dateFilter };
+  let policyRevenueWhere: any = { ...dateFilter };
   let jobWhere: any = { ...dateFilter };
   let activeUsers: number | undefined = undefined;
 
   if (req.user!.role === UserRole.CTV) {
-    policyWhere = {
+    policyCountWhere = {
       ...dateFilter,
       OR: [
         { userId: req.user!.id },
         { revenueUserId: req.user!.id }
       ]
+    };
+    policyRevenueWhere = {
+      ...dateFilter,
+      revenueUserId: req.user!.id
     };
     jobWhere = { userId: req.user!.id, ...dateFilter };
   } else if (req.user!.role === UserRole.MANAGER) {
@@ -54,12 +59,16 @@ dashboardRouter.get("/stats", asyncHandler(async (req, res) => {
       select: { id: true }
     });
     const allowedUserIds = [req.user!.id, ...ctvUsers.map(u => u.id)];
-    policyWhere = {
+    policyCountWhere = {
       ...dateFilter,
       OR: [
         { userId: { in: allowedUserIds } },
         { revenueUserId: { in: allowedUserIds } }
       ]
+    };
+    policyRevenueWhere = {
+      ...dateFilter,
+      revenueUserId: { in: allowedUserIds }
     };
     jobWhere = { userId: { in: allowedUserIds }, ...dateFilter };
     activeUsers = await prisma.user.count({
@@ -67,21 +76,22 @@ dashboardRouter.get("/stats", asyncHandler(async (req, res) => {
     });
   } else {
     // ADMIN
-    policyWhere = { ...dateFilter };
+    policyCountWhere = { ...dateFilter };
+    policyRevenueWhere = { ...dateFilter };
     jobWhere = { ...dateFilter };
     activeUsers = await prisma.user.count({ where: { status: "ACTIVE" } });
   }
 
   const [totalPolicies, issuedPolicies, failedPolicies, pendingJobs] = await Promise.all([
-    prisma.policy.count({ where: policyWhere }),
-    prisma.policy.count({ where: { ...policyWhere, status: PolicyStatus.ISSUED } }),
-    prisma.policy.count({ where: { ...policyWhere, status: PolicyStatus.FAILED } }),
+    prisma.policy.count({ where: policyCountWhere }),
+    prisma.policy.count({ where: { ...policyCountWhere, status: PolicyStatus.ISSUED } }),
+    prisma.policy.count({ where: { ...policyCountWhere, status: PolicyStatus.FAILED } }),
     prisma.job.count({ where: { ...jobWhere, status: { in: [JobStatus.QUEUED, JobStatus.PROCESSING] } } })
   ]);
 
-  // Query all issued policies in the filtered range to calculate revenue
+  // Query all issued policies in the filtered range to calculate revenue (by revenueUserId only)
   const issuedPoliciesList = await prisma.policy.findMany({
-    where: { ...policyWhere, status: PolicyStatus.ISSUED },
+    where: { ...policyRevenueWhere, status: PolicyStatus.ISSUED },
     select: { premium: true, passengerCount: true, passengerFee: true }
   });
 

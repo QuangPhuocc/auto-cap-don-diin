@@ -24,6 +24,14 @@ userRouter.patch("/profile", asyncHandler(async (req, res) => {
   res.json(user);
 }));
 
+userRouter.get("/issuers", asyncHandler(async (req, res) => {
+  const items = await prisma.user.findMany({
+    where: { status: UserStatus.ACTIVE },
+    select: { id: true, fullName: true, phone: true, username: true }
+  });
+  res.json(items);
+}));
+
 userRouter.use(authorize(UserRole.ADMIN, UserRole.MANAGER));
 
 const createSchema = z.object({
@@ -102,6 +110,10 @@ userRouter.post("/", asyncHandler(async (req, res) => {
     throw new AppError(403, "Quản lý chỉ được phép tạo tài khoản CTV");
   }
   if (await prisma.user.findUnique({ where: { username: input.username } })) throw new AppError(409, "Tên đăng nhập đã tồn tại", "USERNAME_EXISTS");
+  if (input.phone) {
+    const existingPhone = await prisma.user.findUnique({ where: { phone: input.phone } });
+    if (existingPhone) throw new AppError(409, "Số điện thoại đã được đăng ký", "PHONE_EXISTS");
+  }
   const { password, ...profile } = input;
   const user = await prisma.user.create({
     data: {
@@ -127,6 +139,10 @@ userRouter.patch("/:id", asyncHandler(async (req, res) => {
   if (input.username && input.username !== targetUser.username) {
     const existing = await prisma.user.findUnique({ where: { username: input.username } });
     if (existing) throw new AppError(409, "Tên đăng nhập đã tồn tại", "USERNAME_EXISTS");
+  }
+  if (input.phone && input.phone !== targetUser.phone) {
+    const existingPhone = await prisma.user.findUnique({ where: { phone: input.phone } });
+    if (existingPhone) throw new AppError(409, "Số điện thoại đã được đăng ký", "PHONE_EXISTS");
   }
 
   const { password, ...data } = input;

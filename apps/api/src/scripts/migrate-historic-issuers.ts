@@ -16,9 +16,7 @@ async function main() {
   const users = await prisma.user.findMany();
   console.log(`Đã load ${users.length} tài khoản người dùng.`);
 
-  const policies = await prisma.policy.findMany({
-    where: { revenueUserId: null }
-  });
+  const policies = await prisma.policy.findMany();
   console.log(`Tìm thấy ${policies.length} đơn hàng cũ chưa có revenueUserId.`);
 
   let updatedCount = 0;

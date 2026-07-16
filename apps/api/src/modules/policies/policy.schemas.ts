@@ -38,6 +38,7 @@ export const singlePolicySchema = z.object({
   email: z.string().email("Email không hợp lệ").optional().or(z.literal("")),
   agent: z.string().optional().nullable(),
   issuerName: z.string().optional().nullable(),
+  revenueUserId: z.string().optional().nullable(),
   insuranceYears: z.coerce.number().int().min(1).max(3).default(1)
 }).refine((data) => {
   const seat = data.seatCount ?? 0;
