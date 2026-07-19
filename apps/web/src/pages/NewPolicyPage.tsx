@@ -130,6 +130,13 @@ export function NewPolicyPage() {
       return;
     }
 
+    const MAX_SIZE_MB = 20;
+    if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+      setOcrError(`Kích thước tệp quá lớn (${(file.size / 1024 / 1024).toFixed(1)}MB). Giới hạn tối đa là ${MAX_SIZE_MB}MB.`);
+      setOcrSuccess(null);
+      return;
+    }
+
     setOcrLoading(true);
     setOcrError(null);
     setOcrSuccess(null);
@@ -171,7 +178,15 @@ export function NewPolicyPage() {
         setOcrError(res.message || "Nhận diện thông tin thất bại. Vui lòng tự nhập tay.");
       }
     } catch (err) {
-      setOcrError(err instanceof Error ? err.message : "Không thể kết nối đến máy chủ để nhận diện OCR");
+      if (err instanceof ApiError) {
+        if (err.status === 413) {
+          setOcrError(`Kích thước tệp quá lớn. Giới hạn tối đa là ${MAX_SIZE_MB}MB.`);
+        } else {
+          setOcrError(err.message || "Không thể kết nối đến máy chủ để nhận diện OCR");
+        }
+      } else {
+        setOcrError(err instanceof Error ? err.message : "Không thể kết nối đến máy chủ để nhận diện OCR");
+      }
     } finally {
       setOcrLoading(false);
     }
